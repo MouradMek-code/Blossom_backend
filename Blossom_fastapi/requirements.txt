@@ -21,6 +21,7 @@ httpx==0.28.1
 idna==3.18
 passlib==1.7.4
 phonenumbers==9.0.32
+psycopg2-binary==2.9.12
 pyasn1==0.6.3
 pycparser==3.0
 pydantic==2.13.4
