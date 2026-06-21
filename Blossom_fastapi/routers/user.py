@@ -302,7 +302,10 @@ async def send_email_verification(request:UserBase,db:Session = Depends(get_db))
     phone_number=request.phone_number
     email = request.email
     otp = str(random.randint(100000, 999999))
-
+    phone_number = phone_number.replace("tel:", "")
+    phone_number = re.sub(r"[^\d+]", "", phone_number)
+    result=await send_email_otp(email,phone_number, otp)
+    
     db_otp = OTP(
         phone_number=phone_number,
         email=email,
@@ -314,9 +317,6 @@ async def send_email_verification(request:UserBase,db:Session = Depends(get_db))
     db.commit()
     phone_number = str(phone_number)
 
-    phone_number = phone_number.replace("tel:", "")
-    phone_number = re.sub(r"[^\d+]", "", phone_number)
-    result=await send_email_otp(email,phone_number, otp)
 
     if "message_id" in result:
         return {"messages": "sent","detail":result,"email":email}
