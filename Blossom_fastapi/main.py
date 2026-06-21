@@ -21,6 +21,9 @@ app.include_router(message.router)
 @app.get("/")
 async def root():
     return {"message": "Hello World"}
+@app.api_route("/post/health", methods=["GET", "HEAD"])
+async def health():
+    return {"status": "ok"}
 
 models.Base.metadata.create_all(bind=engine)
 app.add_middleware(
