@@ -18,7 +18,7 @@ app.include_router(profile_language.router)
 app.include_router(likes.router)
 app.include_router(match.router)
 app.include_router(message.router)
-@app.api_route("/post/health", methods=["GET", "HEAD"])
+@app.api_route("/health", methods=["GET", "HEAD"])
 async def health():
     return {"status": "ok"}
 
