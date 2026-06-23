@@ -324,3 +324,11 @@ class VerifyOTPRequest(BaseModel):
     email:str
     otp: str
 
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+class ResetPasswordRequest(BaseModel):
+    email: EmailStr
+    otp: str
+    new_password: str = Field(min_length=8, max_length=100)
+

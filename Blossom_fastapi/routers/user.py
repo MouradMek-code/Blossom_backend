@@ -7,13 +7,14 @@ from sib_api_v3_sdk.rest import ApiException
 import json
 from vonage import Auth, Vonage
 from vonage_messages import Sms
-from routers.schemas import VerifyOTPRequest
+from routers.schemas import VerifyOTPRequest, ForgotPasswordRequest, ResetPasswordRequest
 from database.models import DbUser
 from datetime import datetime, timedelta
 from database import db_user
 from database.database import get_db
 from routers.schemas import UserDisplay, UserBase
 from database.models import OTP
+from methods import HashedPassword
 from dotenv import load_dotenv
 import os
 
@@ -290,6 +291,162 @@ async def send_email_otp(email: str,phone_number:str, otp: str):
             "success": False,
             "error": str(e)
         }
+
+async def send_password_reset_email(email: str, otp: str):
+    configuration = sib_api_v3_sdk.Configuration()
+    configuration.api_key['api-key'] = BREVO_API_KEY
+
+    api = sib_api_v3_sdk.TransactionalEmailsApi(
+        sib_api_v3_sdk.ApiClient(configuration)
+    )
+
+    email_data = sib_api_v3_sdk.SendSmtpEmail(
+        to=[{"email": email}],
+        sender={
+            "name": "Blossom",
+            "email": "mourad.meknioui@gmail.com"
+        },
+        subject="🌹 Reset your Blossom password",
+        html_content=f"""
+    <div style="background:#fff5f7;padding:30px 15px;font-family:Arial,sans-serif;">
+        <div style="
+            max-width:520px;
+            margin:auto;
+            background:#ffffff;
+            border-radius:20px;
+            padding:40px 30px;
+            text-align:center;
+            box-shadow:0 3px 15px rgba(0,0,0,0.08);
+        ">
+
+            <div style="font-size:50px;margin-bottom:10px;">
+                🌸
+            </div>
+
+            <h1 style="
+                color:#e91e63;
+                margin:0;
+                font-size:32px;
+            ">
+                Blossom Dating
+            </h1>
+
+            <p style="
+                color:#666;
+                font-size:16px;
+                margin-top:20px;
+                line-height:1.6;
+            ">
+                We received a request to reset your password.
+                Use the code below to choose a new one.
+            </p>
+
+            <div style="
+                background:#e91e63;
+                color:white;
+                font-size:42px;
+                font-weight:bold;
+                letter-spacing:10px;
+                padding:22px;
+                border-radius:14px;
+                margin:20px 0;
+            ">
+                {otp}
+            </div>
+
+            <p style="
+                color:#666;
+                font-size:15px;
+            ">
+                This code expires in
+                <strong>10 minutes</strong>.
+            </p>
+
+            <div style="
+                background:#fff0f4;
+                border-radius:10px;
+                padding:15px;
+                margin-top:25px;
+                color:#777;
+                font-size:13px;
+                line-height:1.5;
+            ">
+                🔒 If you didn't request this, you can safely ignore this
+                email - your password won't be changed.
+            </div>
+
+            <p style="
+                color:#e91e63;
+                font-size:13px;
+                margin-top:20px;
+                font-weight:bold;
+            ">
+                Made with ❤️ by Blossom
+            </p>
+
+        </div>
+    </div>
+    """
+    )
+
+    try:
+        response = api.send_transac_email(email_data)
+        return {
+            "success": True,
+            "message_id": response.message_id,
+        }
+    except ApiException as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+@router.post("/forgot_password")
+async def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    user = db.query(DbUser).filter(DbUser.email == request.email).first()
+    if not user:
+        # Don't reveal whether the email is registered.
+        return {"message": "If that email exists, a reset code has been sent."}
+
+    otp = str(random.randint(100000, 999999))
+
+    db_otp = OTP(
+        phone_number=user.phone_number,
+        email=request.email,
+        code=otp,
+        expires_at=datetime.now() + timedelta(minutes=10)
+    )
+    db.add(db_otp)
+    db.commit()
+
+    await send_password_reset_email(request.email, otp)
+
+    return {"message": "If that email exists, a reset code has been sent."}
+
+@router.post("/reset_password")
+async def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db)):
+    record = db.query(OTP).filter(
+        OTP.email == request.email
+    ).order_by(OTP.id.desc()).first()
+
+    if not record:
+        raise HTTPException(400, "Reset code not found")
+    if record.expires_at < datetime.now():
+        raise HTTPException(400, "Reset code expired")
+    if record.code != request.otp:
+        raise HTTPException(400, "Invalid reset code")
+
+    user = db.query(DbUser).filter(DbUser.email == request.email).first()
+    if not user:
+        raise HTTPException(404, "User not found")
+
+    user.password = HashedPassword.HashedPassword.hash_password(request.new_password)
+    db.commit()
+
+    db.query(OTP).filter(OTP.email == request.email).delete()
+    db.commit()
+
+    return {"message": "Password updated"}
 
 @router.post("/send_email")
 async def send_email_verification(request:UserBase,db:Session = Depends(get_db)):
