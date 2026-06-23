@@ -59,3 +59,39 @@ def like_profile(
         "liked": True,
         "matched": False
     }
+
+
+def count_unseen_likes(
+    db: Session,
+    current_user_id: int
+):
+    profile = db.query(DbProfile).filter(DbProfile.user_id == current_user_id).first()
+
+    matched_profiles = db.query(DbMatch).filter(
+        (DbMatch.profile1_id == profile.id) |
+        (DbMatch.profile2_id == profile.id)
+    ).all()
+    matched_ids = [
+        m.profile2_id if m.profile1_id == profile.id else m.profile1_id
+        for m in matched_profiles
+    ]
+
+    return db.query(DbProfileLike).filter(
+        DbProfileLike.liked_profile_id == profile.id,
+        DbProfileLike.seen == False,  # noqa: E712
+        ~DbProfileLike.liker_profile_id.in_(matched_ids)
+    ).count()
+
+
+def mark_likes_seen(
+    db: Session,
+    current_user_id: int
+):
+    profile = db.query(DbProfile).filter(DbProfile.user_id == current_user_id).first()
+
+    db.query(DbProfileLike).filter(
+        DbProfileLike.liked_profile_id == profile.id,
+        DbProfileLike.seen == False,  # noqa: E712
+    ).update({DbProfileLike.seen: True})
+
+    db.commit()

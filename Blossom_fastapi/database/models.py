@@ -148,6 +148,13 @@ class DbProfileLike(Base):
         default=datetime.utcnow
     )
 
+    seen = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false"
+    )
+
     __table_args__ = (
         UniqueConstraint(
             "liker_profile_id",
@@ -187,6 +194,21 @@ class DbMatch(Base):
             DateTime,
             default=datetime.utcnow
         )
+
+        seen_by_profile1 = Column(
+            Boolean,
+            nullable=False,
+            default=False,
+            server_default="false"
+        )
+
+        seen_by_profile2 = Column(
+            Boolean,
+            nullable=False,
+            default=False,
+            server_default="false"
+        )
+
         conversation = relationship(
             "DbConversation",
             back_populates="match",

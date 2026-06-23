@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from pip._internal.network import auth
+from sqlalchemy import text
 
 from database import models
 from database.database import engine
@@ -25,6 +26,22 @@ async def health():
 
 
 models.Base.metadata.create_all(bind=engine)
+
+# Base.metadata.create_all only creates tables that don't exist yet - it
+# won't add new columns to tables that were already created by a previous
+# deploy. These ALTER TABLE statements are idempotent (IF NOT EXISTS) so
+# they're safe to run on every startup without an Alembic migration setup.
+with engine.begin() as connection:
+    connection.execute(text(
+        "ALTER TABLE profile_like ADD COLUMN IF NOT EXISTS seen BOOLEAN NOT NULL DEFAULT false"
+    ))
+    connection.execute(text(
+        "ALTER TABLE match ADD COLUMN IF NOT EXISTS seen_by_profile1 BOOLEAN NOT NULL DEFAULT false"
+    ))
+    connection.execute(text(
+        "ALTER TABLE match ADD COLUMN IF NOT EXISTS seen_by_profile2 BOOLEAN NOT NULL DEFAULT false"
+    ))
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

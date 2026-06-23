@@ -26,6 +26,21 @@ def like_profile(
         liked_profile_id
     )
 
+@router.get("/profile_likes/unseen_count")
+def unseen_likes_count(
+    db: Session = Depends(get_db),
+    current_user: UserAuth = Depends(get_current_user)
+):
+    return {"count": db_like.count_unseen_likes(db, current_user.id)}
+
+@router.post("/profile_likes/mark_seen")
+def mark_likes_seen(
+    db: Session = Depends(get_db),
+    current_user: UserAuth = Depends(get_current_user)
+):
+    db_like.mark_likes_seen(db, current_user.id)
+    return {"status": "ok"}
+
 @router.get("/profile_likes")
 def profile_liker(db: Session = Depends(get_db),
     current_user: UserAuth=Depends(get_current_user)
