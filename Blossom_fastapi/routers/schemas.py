@@ -324,6 +324,9 @@ class VerifyOTPRequest(BaseModel):
     email:str
     otp: str
 
+class BioUpdate(BaseModel):
+    bio: str
+
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
 

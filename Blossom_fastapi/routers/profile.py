@@ -7,7 +7,7 @@ from database import db_profile,db_message
 from database.models import DbProfile,DbProfilePhoto
 from auth.oauth2 import get_current_user
 from database.database import get_db
-from routers.schemas import ProfileBase, ProfileDisplay, UserAuth,ProfileDisplayforPhoto
+from routers.schemas import ProfileBase, ProfileDisplay, UserAuth,ProfileDisplayforPhoto,BioUpdate
 from routers.schemas import UserAuth,ProfilePhotoDisplay
 import cloudinary.uploader
 import cloudinary
@@ -76,6 +76,20 @@ def update_location(city:str,country:str,db:Session = Depends(get_db),current_us
     if result is None:
         raise HTTPException(status_code=404,detail="Profiles still doesn't exist")
     return result
+
+@router.put("/bio", response_model=ProfileDisplay)
+def update_bio(request:BioUpdate,db:Session = Depends(get_db),current_user: UserAuth=Depends(get_current_user)):
+    result=db_profile.update_bio(db,current_user,request.bio)
+    if result is None:
+        raise HTTPException(status_code=404,detail="Profile still doesn't exist")
+    return result
+
+@router.delete("/image/{photo_id}")
+def delete_image(photo_id:int,db:Session = Depends(get_db),current_user: UserAuth=Depends(get_current_user)):
+    result=db_profile.delete_profile_photo(db,current_user,photo_id)
+    if result is None:
+        raise HTTPException(status_code=404,detail="Photo not found")
+    return {"message":"Photo deleted"}
 
 @router.get(
     "/profile/{profile_id}"

@@ -1,4 +1,4 @@
-from database.models import  DbProfile,DbProfileLike,DbConversation
+from database.models import  DbProfile,DbProfileLike,DbConversation,DbProfilePhoto
 from routers.schemas import ProfileBase, UserAuth
 from sqlalchemy.orm import Session
 from datetime import datetime
@@ -103,6 +103,33 @@ def update_profile(db:Session,user:UserAuth,city:str,country:str):
     })
     db.commit()
     return profile_db.first()
+
+def update_bio(db:Session,user:UserAuth,bio:str):
+
+    profile_db=db.query(DbProfile).filter(DbProfile.user_id == user.id)
+    profile_db.update({
+        DbProfile.bio:bio
+    })
+    db.commit()
+    return profile_db.first()
+
+def delete_profile_photo(db:Session,user:UserAuth,photo_id:int):
+
+    profile = db.query(DbProfile).filter(DbProfile.user_id == user.id).first()
+    if not profile:
+        return None
+
+    photo = db.query(DbProfilePhoto).filter(
+        DbProfilePhoto.id == photo_id,
+        DbProfilePhoto.profile_id == profile.id
+    ).first()
+
+    if not photo:
+        return None
+
+    db.delete(photo)
+    db.commit()
+    return photo
 
 def get_profiles_matched(db:Session,user:UserAuth):
     profile_db = db.query(DbProfile).filter(DbProfile.user_id == user.id).first()
