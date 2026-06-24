@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from fastapi import Depends
+from fastapi import Depends, HTTPException
 
 from sqlalchemy.orm import Session
 
@@ -34,3 +34,14 @@ def mark_matches_seen(
 ):
     db_match.mark_matches_seen(db, current_user.id)
     return {"status": "ok"}
+
+@router.delete("/unmatch/{profile_id}")
+def unmatch(
+    profile_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    result = db_match.unmatch(db, current_user.id, profile_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Match not found")
+    return {"message": "Unmatched"}
