@@ -62,12 +62,10 @@ def profile_liker(db: Session = Depends(get_db),
         ~DbProfileLike.liker_profile_id.in_(matched_ids)
     ).all()
 
-    if profileslikers:
-      profileslikersid=[]
-      for profilesliker in profileslikers:
-         profileslikersid.append(profilesliker.liker_profile_id)
-         return profileslikersid
-    return []
+    profileslikersid=[]
+    for profilesliker in profileslikers:
+        profileslikersid.append(profilesliker.liker_profile_id)
+    return profileslikersid
 
 @router.get("/profiles_i_liked")
 def profiles_i_liked(
