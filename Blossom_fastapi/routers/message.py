@@ -21,9 +21,10 @@ def conversations(
     db: Session = Depends(get_db),
     user: UserAuth = Depends(get_current_user)
 ):
+    db_profile_instance = db.query(DbProfile).filter(DbProfile.user_id == user.id).first()
     return db_message.get_my_conversations(
         db,
-        user
+        db_profile_instance.id
     )
 
 @router.get(
@@ -35,9 +36,11 @@ def messages(
     db: Session = Depends(get_db),
     user: UserAuth = Depends(get_current_user)
 ):
+    db_profile_instance = db.query(DbProfile).filter(DbProfile.user_id == user.id).first()
     return db_message.get_messages(
         db,
-        conversation_id
+        conversation_id,
+        db_profile_instance.id
     )
 
 
