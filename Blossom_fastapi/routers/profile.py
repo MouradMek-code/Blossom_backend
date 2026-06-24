@@ -63,6 +63,7 @@ async def upload_image(image:UploadFile=File(...),db:Session = Depends(get_db),c
     db_profile_instance = db.query(DbProfile).filter(DbProfile.user_id == current_use.id).first()
     db_profile_photo = DbProfilePhoto(
         image_url=result["secure_url"],
+        public_id=result["public_id"],
         profile_id=db_profile_instance.id
     )
     db.add(db_profile_photo)

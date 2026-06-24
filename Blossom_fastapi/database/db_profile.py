@@ -3,6 +3,7 @@ from routers.schemas import ProfileBase, UserAuth
 from sqlalchemy.orm import Session
 from datetime import datetime
 from database.models import DbMatch
+import cloudinary.uploader
 def create_profile(db:Session,request:ProfileBase,user:UserAuth):
     print(request)
     db_profile=DbProfile(
@@ -126,6 +127,14 @@ def delete_profile_photo(db:Session,user:UserAuth,photo_id:int):
 
     if not photo:
         return None
+
+    if photo.public_id:
+        try:
+            cloudinary.uploader.destroy(photo.public_id)
+        except Exception:
+            # Don't block deleting the DB row over a Cloudinary hiccup -
+            # worst case is an orphaned asset, not a broken request.
+            pass
 
     db.delete(photo)
     db.commit()

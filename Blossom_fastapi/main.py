@@ -41,6 +41,9 @@ with engine.begin() as connection:
     connection.execute(text(
         "ALTER TABLE match ADD COLUMN IF NOT EXISTS seen_by_profile2 BOOLEAN NOT NULL DEFAULT false"
     ))
+    connection.execute(text(
+        "ALTER TABLE profile_photos ADD COLUMN IF NOT EXISTS public_id VARCHAR(255)"
+    ))
 
 app.add_middleware(
     CORSMiddleware,

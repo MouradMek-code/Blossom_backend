@@ -113,6 +113,7 @@ class DbProfilePhoto(Base):
 
 
         image_url = Column(String(500), nullable=False)
+        public_id = Column(String(255), nullable=True)
         profile_id = Column(
             Integer,
             ForeignKey("profiles.id", ondelete="CASCADE"),
