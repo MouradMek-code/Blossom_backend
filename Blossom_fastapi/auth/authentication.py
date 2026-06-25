@@ -9,9 +9,15 @@ router=APIRouter(tags=["authentication"])
 
 @router.post('/login')
 async def login(request : OAuth2PasswordRequestForm = Depends(),db: Session = Depends(get_db)):
-    user = db.query(DbUser).filter(DbUser.username == request.username).first()
+    # OAuth2PasswordRequestForm always names this field "username" per spec,
+    # but the value itself can be either a username or an email - look up
+    # by whichever one matches.
+    identifier = request.username
+    user = db.query(DbUser).filter(
+        (DbUser.username == identifier) | (DbUser.email == identifier)
+    ).first()
     if not user:
-       raise HTTPException(status_code=404, detail="Incorrect username")
+       raise HTTPException(status_code=404, detail="Incorrect username or email")
 
     request_password=request.password
     if not request_password:
