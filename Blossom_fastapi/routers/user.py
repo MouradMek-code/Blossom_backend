@@ -10,11 +10,12 @@ from vonage_messages import Sms
 from routers.schemas import VerifyOTPRequest, ForgotPasswordRequest, ResetPasswordRequest
 from database.models import DbUser
 from datetime import datetime, timedelta
-from database import db_user
+from database import db_user, db_profile
 from database.database import get_db
-from routers.schemas import UserDisplay, UserBase
+from routers.schemas import UserDisplay, UserBase, UserAuth
 from database.models import OTP
 from methods import HashedPassword
+from auth.oauth2 import get_current_user
 from dotenv import load_dotenv
 import os
 
@@ -71,6 +72,10 @@ def get_all_users(db:Session = Depends(get_db)):
 @router.get('/{id}', response_model=UserDisplay)
 def get_user_by_id(id:int,db:Session = Depends(get_db)):
     return db_user.get_user_by_id(db,id)
+
+@router.delete('/me')
+def delete_my_account(db: Session = Depends(get_db), current_user: UserAuth = Depends(get_current_user)):
+    return db_profile.delete_account(db, current_user)
 
 @router.delete('/all')
 def delete_all_users(db:Session = Depends(get_db)):

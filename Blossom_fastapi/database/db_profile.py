@@ -1,4 +1,4 @@
-from database.models import  DbProfile,DbProfileLike,DbConversation,DbProfilePhoto
+from database.models import  DbProfile,DbProfileLike,DbConversation,DbProfilePhoto,DbLanguage,DbMessage,DbUser
 from routers.schemas import ProfileBase, UserAuth
 from sqlalchemy.orm import Session
 from datetime import datetime
@@ -214,3 +214,40 @@ def get_or_create_conversation(
     return {
         "conversation_id": conversation.id
     }
+
+def delete_account(db: Session, user: UserAuth):
+    profile = db.query(DbProfile).filter(DbProfile.user_id == user.id).first()
+
+    if profile:
+        photos = db.query(DbProfilePhoto).filter(DbProfilePhoto.profile_id == profile.id).all()
+        for photo in photos:
+            if photo.public_id:
+                try:
+                    cloudinary.uploader.destroy(photo.public_id)
+                except Exception:
+                    # An orphaned Cloudinary asset isn't worth blocking account deletion over.
+                    pass
+            db.delete(photo)
+
+        db.query(DbLanguage).filter(DbLanguage.profile_id == profile.id).delete()
+
+        matches = db.query(DbMatch).filter(
+            (DbMatch.profile1_id == profile.id) | (DbMatch.profile2_id == profile.id)
+        ).all()
+        for match in matches:
+            conversation = db.query(DbConversation).filter(DbConversation.match_id == match.id).first()
+            if conversation:
+                db.query(DbMessage).filter(DbMessage.conversation_id == conversation.id).delete()
+                db.delete(conversation)
+            db.delete(match)
+
+        db.query(DbProfileLike).filter(
+            (DbProfileLike.liker_profile_id == profile.id) | (DbProfileLike.liked_profile_id == profile.id)
+        ).delete()
+
+        db.delete(profile)
+
+    db_user = db.query(DbUser).filter(DbUser.id == user.id).first()
+    db.delete(db_user)
+    db.commit()
+    return {"message": "Account deleted"}
