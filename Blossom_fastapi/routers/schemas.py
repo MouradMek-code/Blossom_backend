@@ -340,6 +340,10 @@ class VerifyOTPRequest(BaseModel):
 class BioUpdate(BaseModel):
     bio: str
 
+class ReportCreate(BaseModel):
+    reported_profile_id: int
+    reason: str = Field(min_length=1, max_length=1000)
+
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
 

@@ -3,6 +3,7 @@ from database.models import DbPost,DbMessage,DbConversation,DbMatch
 from routers.schemas import UserBase, PostBase
 from sqlalchemy.orm import Session
 from datetime import datetime
+from database import db_block
 
 
 def get_conversation_for_profile(
@@ -36,6 +37,13 @@ def send_message(
             status_code=403,
             detail="You don't have access to this conversation"
         )
+
+    match = conversation.match
+    other_profile_id = (
+        match.profile2_id if match.profile1_id == profile_id else match.profile1_id
+    )
+    if db_block.is_blocked_either_direction(db, profile_id, other_profile_id):
+        raise HTTPException(status_code=403, detail="You can't message a blocked profile")
 
     message = DbMessage(
         conversation_id=conversation_id,

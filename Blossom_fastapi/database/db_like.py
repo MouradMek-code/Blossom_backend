@@ -1,8 +1,10 @@
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from database.models import DbProfileLike
 from database.models import DbMatch
 from database.models import  DbProfile,DbConversation
+from database import db_block
 
 def like_profile(
     db: Session,
@@ -10,6 +12,10 @@ def like_profile(
     liked_profile_id: int
 ):
     profile_db = db.query(DbProfile).filter(DbProfile.user_id == current_user_id).first()
+
+    if db_block.is_blocked_either_direction(db, profile_db.id, liked_profile_id):
+        raise HTTPException(status_code=403, detail="You can't like a blocked profile")
+
     existing = db.query(DbProfileLike).filter(
         DbProfileLike.liker_profile_id == profile_db.id,
         DbProfileLike.liked_profile_id == liked_profile_id

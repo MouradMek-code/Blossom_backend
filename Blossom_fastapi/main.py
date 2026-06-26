@@ -6,7 +6,7 @@ from database import models
 from database.database import engine
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from routers import user, post,comment,profile,profile_language,likes,match,message
+from routers import user, post,comment,profile,profile_language,likes,match,message,block,report
 from auth import authentication
 
 app = FastAPI()
@@ -19,6 +19,8 @@ app.include_router(profile_language.router)
 app.include_router(likes.router)
 app.include_router(match.router)
 app.include_router(message.router)
+app.include_router(block.router)
+app.include_router(report.router)
 @app.api_route("/health", methods=["GET", "HEAD"])
 async def health():
     return {"status": "ok"}

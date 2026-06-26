@@ -3,6 +3,7 @@ from routers.schemas import ProfileBase, UserAuth
 from sqlalchemy.orm import Session
 from datetime import datetime
 from database.models import DbMatch
+from database import db_block
 import cloudinary.uploader
 def create_profile(db:Session,request:ProfileBase,user:UserAuth):
     print(request)
@@ -82,6 +83,8 @@ def get_all_profiles(db: Session, user: UserAuth):
             excluded_profile_ids.add(match.profile2_id)
         else:
             excluded_profile_ids.add(match.profile1_id)
+
+    excluded_profile_ids.update(db_block.get_block_relation_ids(db, current_profile.id))
 
     profiles = (
         db.query(DbProfile)

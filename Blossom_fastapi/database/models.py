@@ -291,3 +291,59 @@ class OTP(Base):
         email = Column(String)
         code = Column(String)
         expires_at = Column(DateTime)
+
+
+class DbBlock(Base):
+    __tablename__ = "profile_block"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    blocker_profile_id = Column(
+        Integer,
+        ForeignKey("profiles.id"),
+        nullable=False
+    )
+
+    blocked_profile_id = Column(
+        Integer,
+        ForeignKey("profiles.id"),
+        nullable=False
+    )
+
+    created_at = Column(
+        DateTime,
+        default=datetime.utcnow
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "blocker_profile_id",
+            "blocked_profile_id",
+            name="uq_profile_block"
+        ),
+    )
+
+
+class DbReport(Base):
+    __tablename__ = "profile_report"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    reporter_profile_id = Column(
+        Integer,
+        ForeignKey("profiles.id"),
+        nullable=False
+    )
+
+    reported_profile_id = Column(
+        Integer,
+        ForeignKey("profiles.id"),
+        nullable=False
+    )
+
+    reason = Column(Text, nullable=False)
+
+    created_at = Column(
+        DateTime,
+        default=datetime.utcnow
+    )
