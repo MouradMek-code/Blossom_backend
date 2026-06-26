@@ -1,12 +1,25 @@
 from typing import List, Optional
 from pydantic_extra_types.phone_numbers import PhoneNumber
-from pydantic import BaseModel,EmailStr, Field
-from datetime import datetime
+from pydantic import BaseModel,EmailStr, Field, field_validator
+from datetime import datetime, date
+
+MIN_SIGNUP_AGE = 18
+
 class UserBase(BaseModel):
     username: str
     email: EmailStr | None = Field(default=None)
     password: str = Field(min_length=8, max_length=100)
     phone_number: PhoneNumber
+    date_of_birth: date
+
+    @field_validator("date_of_birth")
+    @classmethod
+    def must_be_adult(cls, value: date) -> date:
+        today = date.today()
+        age = today.year - value.year - ((today.month, today.day) < (value.month, value.day))
+        if age < MIN_SIGNUP_AGE:
+            raise ValueError(f"You must be at least {MIN_SIGNUP_AGE} years old to sign up")
+        return value
 
 class User(BaseModel):
     username:str

@@ -44,6 +44,9 @@ with engine.begin() as connection:
     connection.execute(text(
         "ALTER TABLE profile_photos ADD COLUMN IF NOT EXISTS public_id VARCHAR(255)"
     ))
+    connection.execute(text(
+        "ALTER TABLE \"user\" ADD COLUMN IF NOT EXISTS date_of_birth DATE"
+    ))
 
 app.add_middleware(
     CORSMiddleware,

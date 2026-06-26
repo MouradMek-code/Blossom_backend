@@ -11,6 +11,7 @@ class DbUser(Base):
     email = Column(String)
     password = Column(String)
     phone_number = Column(String)
+    date_of_birth = Column(Date)
     posts = relationship("DbPost",back_populates="user")
     profile=relationship("DbProfile",back_populates="user",
     uselist=False)

@@ -12,6 +12,7 @@ def create_user(db : Session,request:UserBase):
     username=request.username,
     email=request.email,
     phone_number=request.phone_number,
+    date_of_birth=request.date_of_birth,
     password=HashedPassword.HashedPassword.hash_password(request.password)
     )
     access_token = oauth2.create_access_token(data={"username": request.username})
