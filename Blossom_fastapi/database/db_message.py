@@ -1,5 +1,5 @@
 from fastapi import HTTPException
-from database.models import DbPost,DbMessage,DbConversation,DbMatch
+from database.models import DbPost,DbMessage,DbConversation,DbMatch,DbProfile
 from routers.schemas import UserBase, PostBase
 from sqlalchemy.orm import Session
 from datetime import datetime
@@ -44,6 +44,21 @@ def send_message(
     )
     if db_block.is_blocked_either_direction(db, profile_id, other_profile_id):
         raise HTTPException(status_code=403, detail="You can't message a blocked profile")
+
+    first_message = db.query(DbMessage).filter(
+        DbMessage.conversation_id == conversation_id
+    ).first() is None
+
+    if first_message:
+        sender_profile = db.query(DbProfile).filter(DbProfile.id == profile_id).first()
+        other_profile = db.query(DbProfile).filter(DbProfile.id == other_profile_id).first()
+        genders = {sender_profile.gender, other_profile.gender}
+
+        if genders == {"Man", "Woman"} and sender_profile.gender == "Man":
+            raise HTTPException(
+                status_code=403,
+                detail="In a match between a man and a woman, the woman has to send the first message"
+            )
 
     message = DbMessage(
         conversation_id=conversation_id,
