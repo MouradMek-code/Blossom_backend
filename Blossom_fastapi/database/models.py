@@ -84,6 +84,9 @@ class DbProfile(Base):
     relationship_goal = Column(String(100))
     has_children = Column(String(50))
     wants_children = Column(String(50))
+    first_date_preference = Column(String(100))
+    past_relationships_count = Column(String(50))
+    last_breakup_reason = Column(String(100))
 
     # Personality
     personality_type = Column(String(50))

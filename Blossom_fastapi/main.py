@@ -49,6 +49,15 @@ with engine.begin() as connection:
     connection.execute(text(
         "ALTER TABLE \"user\" ADD COLUMN IF NOT EXISTS date_of_birth DATE"
     ))
+    connection.execute(text(
+        "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS first_date_preference VARCHAR(100)"
+    ))
+    connection.execute(text(
+        "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS past_relationships_count VARCHAR(50)"
+    ))
+    connection.execute(text(
+        "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS last_breakup_reason VARCHAR(100)"
+    ))
 
 app.add_middleware(
     CORSMiddleware,

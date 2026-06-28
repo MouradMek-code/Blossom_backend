@@ -167,6 +167,9 @@ class ProfileBase(BaseModel):
 
     # Relationship
     relationship_goal: Optional[str] = None
+    first_date_preference: Optional[str] = None
+    past_relationships_count: Optional[str] = None
+    last_breakup_reason: Optional[str] = None
 
 
     has_children: Optional[str] = None
@@ -222,6 +225,9 @@ class ProfileDisplay(BaseModel):
     has_pets: str
 
     relationship_goal: Optional[str]
+    first_date_preference: Optional[str] = None
+    past_relationships_count: Optional[str] = None
+    last_breakup_reason: Optional[str] = None
 
     has_children: str
     wants_children: Optional[str]
@@ -268,6 +274,9 @@ class ProfileDisplayforPhoto(BaseModel):
     has_pets: str
 
     relationship_goal: Optional[str]
+    first_date_preference: Optional[str] = None
+    past_relationships_count: Optional[str] = None
+    last_breakup_reason: Optional[str] = None
 
     has_children: str
     wants_children: Optional[str]
