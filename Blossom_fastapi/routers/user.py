@@ -406,6 +406,44 @@ async def send_password_reset_email(email: str, otp: str):
             "error": str(e)
         }
 
+def require_admin(current_user: UserAuth = Depends(get_current_user)):
+    if not getattr(current_user, "is_admin", False):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return current_user
+
+@router.get("/admin/users")
+def admin_get_all_users(db: Session = Depends(get_db), _: UserAuth = Depends(require_admin)):
+    users = db.query(DbUser).order_by(DbUser.id.desc()).all()
+    result = []
+    for u in users:
+        profile = u.profile
+        result.append({
+            "id": u.id,
+            "username": u.username,
+            "email": u.email,
+            "date_of_birth": str(u.date_of_birth) if u.date_of_birth else None,
+            "is_admin": u.is_admin,
+            "profile": {
+                "id": profile.id,
+                "first_name": profile.first_name,
+                "gender": profile.gender,
+                "age": profile.age,
+                "city": profile.city,
+                "country": profile.country,
+                "created_at": str(profile.created_at) if profile.created_at else None,
+                "photo": profile.photos[0].image_url if profile.photos else None,
+            } if profile else None,
+        })
+    return result
+
+@router.delete("/admin/users/{user_id}")
+def admin_delete_user(user_id: int, db: Session = Depends(get_db), _: UserAuth = Depends(require_admin)):
+    user = db.query(DbUser).filter(DbUser.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    db_profile.delete_account(db, user)
+    return {"detail": "User deleted"}
+
 @router.post("/forgot_password")
 async def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(get_db)):
     user = db.query(DbUser).filter(DbUser.email == request.email).first()

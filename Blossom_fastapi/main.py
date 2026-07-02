@@ -58,6 +58,9 @@ with engine.begin() as connection:
     connection.execute(text(
         "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS last_breakup_reason VARCHAR(100)"
     ))
+    connection.execute(text(
+        "ALTER TABLE \"user\" ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false"
+    ))
 
 app.add_middleware(
     CORSMiddleware,
