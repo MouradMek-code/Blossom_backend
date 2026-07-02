@@ -89,6 +89,16 @@ def get_all_profiles(db: Session, user: UserAuth):
 
     excluded_profile_ids.update(db_block.get_block_relation_ids(db, current_profile.id))
 
+    # Exclude admin accounts from browse
+    admin_user_ids = [
+        u.id for u in db.query(DbUser).filter(DbUser.is_admin == True).all()
+    ]
+    if admin_user_ids:
+        admin_profile_ids = [
+            p.id for p in db.query(DbProfile).filter(DbProfile.user_id.in_(admin_user_ids)).all()
+        ]
+        excluded_profile_ids.update(admin_profile_ids)
+
     profiles = (
         db.query(DbProfile)
         .filter(
