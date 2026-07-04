@@ -20,3 +20,12 @@ def create_languages(db:Session,request:ProfileBaseLanguage,user:UserAuth):
 
 def get_languages(db:Session,request:ProfileBaseLanguage,user:UserAuth):
     return db.query(DbProfile).filter(DbProfile.user_id == user.id).first().languages
+
+def create_learning_languages(db, request, user):
+    from database.models import DbLearningLanguage
+    db_profile = db.query(__import__('database.models', fromlist=['DbProfile']).DbProfile).filter_by(user_id=user.id).first()
+    entry = DbLearningLanguage(language_name=request.language_name, profile_id=db_profile.id)
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+    return entry

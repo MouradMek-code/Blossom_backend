@@ -6,7 +6,7 @@ from database import models
 from database.database import engine
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from routers import user, post,comment,profile,profile_language,likes,match,message,block,report
+from routers import user, post,comment,profile,profile_language,profile_learning_language,likes,match,message,block,report
 from auth import authentication
 
 app = FastAPI()
@@ -16,6 +16,7 @@ app.include_router(authentication.router)
 app.include_router(comment.router)
 app.include_router(profile.router)
 app.include_router(profile_language.router)
+app.include_router(profile_learning_language.router)
 app.include_router(likes.router)
 app.include_router(match.router)
 app.include_router(message.router)

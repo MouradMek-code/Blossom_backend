@@ -47,6 +47,14 @@ class DbLanguage(Base):
     profile = relationship("DbProfile",back_populates="languages")
 
 
+class DbLearningLanguage(Base):
+    __tablename__ = "learning_language"
+    id = Column(Integer, primary_key=True, index=True)
+    language_name = Column(String)
+    profile_id = Column(Integer, ForeignKey("profiles.id"))
+    profile = relationship("DbProfile", back_populates="learning_languages")
+
+
 class DbProfile(Base):
     __tablename__ = "profiles"
 
@@ -101,6 +109,7 @@ class DbProfile(Base):
     # Relationships
     user = relationship("DbUser", back_populates="profile")
     languages=relationship("DbLanguage",back_populates="profile")
+    learning_languages=relationship("DbLearningLanguage",back_populates="profile")
     photos = relationship(
         "DbProfilePhoto",
         back_populates="profile",

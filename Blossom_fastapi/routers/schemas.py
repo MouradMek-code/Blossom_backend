@@ -194,6 +194,10 @@ class ProfileLanguage(BaseModel):
     language_name: str
 
 
+class ProfileLearningLanguage(BaseModel):
+    language_name: str
+
+
 class ProfileDisplay(BaseModel):
     id: int
 
@@ -210,6 +214,7 @@ class ProfileDisplay(BaseModel):
     country: Optional[str] = None
 
     languages: List[ProfileLanguage]
+    learning_languages: List[ProfileLearningLanguage] = []
 
 
 
@@ -259,6 +264,7 @@ class ProfileDisplayforPhoto(BaseModel):
 
 
     languages: List[ProfileLanguage]
+    learning_languages: List[ProfileLearningLanguage] = []
 
 
 

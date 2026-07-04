@@ -246,6 +246,8 @@ def delete_account(db: Session, user: UserAuth):
             db.delete(photo)
 
         db.query(DbLanguage).filter(DbLanguage.profile_id == profile.id).delete()
+        from database.models import DbLearningLanguage
+        db.query(DbLearningLanguage).filter(DbLearningLanguage.profile_id == profile.id).delete()
 
         matches = db.query(DbMatch).filter(
             (DbMatch.profile1_id == profile.id) | (DbMatch.profile2_id == profile.id)
