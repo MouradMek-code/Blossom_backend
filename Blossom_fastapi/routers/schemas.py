@@ -198,6 +198,15 @@ class ProfileLearningLanguage(BaseModel):
     language_name: str
 
 
+class ProfileLearningLanguageDisplay(BaseModel):
+    profile_id: int
+    language_name: str
+    profile: ProfileDisplay
+
+    class Config:
+        orm_mode = True
+
+
 class ProfileDisplay(BaseModel):
     id: int
 

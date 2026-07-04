@@ -523,6 +523,24 @@ async def send_email_verification(request:UserBase,db:Session = Depends(get_db))
 
     raise HTTPException(status_code=400, detail=result)
 
+
+@router.post("/resend_email")
+async def resend_email_verification(email: str, phone_number: str, db: Session = Depends(get_db)):
+    otp = str(random.randint(100000, 999999))
+    clean_phone = re.sub(r'[^\d+]', '', phone_number.replace('tel:', ''))
+    result = await send_email_otp(email, clean_phone, otp)
+    db_otp = OTP(
+        phone_number=clean_phone,
+        email=email,
+        code=otp,
+        expires_at=datetime.now() + timedelta(minutes=10)
+    )
+    db.add(db_otp)
+    db.commit()
+    if 'message_id' in result:
+        return {'messages': 'sent'}
+    raise HTTPException(status_code=400, detail=result)
+
 @router.post("/verify-email")
 async def verify_otp_email(request:VerifyOTPRequest,db:Session = Depends(get_db)):
 
