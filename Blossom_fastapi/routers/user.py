@@ -38,10 +38,14 @@ async def create_user(request:UserBase,db:Session = Depends(get_db)):
 async def verify_user(request:UserBase,db:Session = Depends(get_db)):
     db_username = db.query(DbUser).filter(DbUser.username == request.username).first()
     if db_username:
-        raise HTTPException(status_code=400, detail="User with this username already exists")
+        raise HTTPException(status_code=409, detail="This username is already taken. Please choose another.")
     db_email = db.query(DbUser).filter(DbUser.email == request.email).first()
     if db_email:
-        raise HTTPException(status_code=400, detail="User with this email already exists")
+        raise HTTPException(status_code=409, detail="An account with this email already exists. Try logging in instead.")
+    if request.phone_number:
+        db_phone = db.query(DbUser).filter(DbUser.phone_number == request.phone_number).first()
+        if db_phone:
+            raise HTTPException(status_code=409, detail="An account with this phone number already exists.")
     phone_number=request.phone_number
     otp = str(random.randint(100000, 999999))
 
@@ -495,10 +499,14 @@ async def reset_password(request: ResetPasswordRequest, db: Session = Depends(ge
 async def send_email_verification(request:UserBase,db:Session = Depends(get_db)):
     db_username = db.query(DbUser).filter(DbUser.username == request.username).first()
     if db_username:
-        raise HTTPException(status_code=400, detail="User with this username already exists")
+        raise HTTPException(status_code=409, detail="This username is already taken. Please choose another.")
     db_email = db.query(DbUser).filter(DbUser.email == request.email).first()
     if db_email:
-        raise HTTPException(status_code=400, detail="User with this email already exists")
+        raise HTTPException(status_code=409, detail="An account with this email already exists. Try logging in instead.")
+    if request.phone_number:
+        db_phone = db.query(DbUser).filter(DbUser.phone_number == request.phone_number).first()
+        if db_phone:
+            raise HTTPException(status_code=409, detail="An account with this phone number already exists.")
     phone_number=request.phone_number
     email = request.email
     otp = str(random.randint(100000, 999999))

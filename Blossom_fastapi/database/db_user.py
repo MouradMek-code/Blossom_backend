@@ -9,6 +9,10 @@ def create_user(db : Session,request:UserBase):
 
     # Explicit duplicate checks so the client gets a clear 409 with a
     # specific message instead of a raw 500 from the DB unique constraint.
+    # These mirror the /user/send_email gate (username + email + phone) so a
+    # duplicate is caught up-front before the OTP is sent, and again here as a
+    # race-safety net - never only here (that would pass the gate, send a code,
+    # then reject at the very end).
     if db.query(DbUser).filter(DbUser.username == request.username).first():
         raise HTTPException(status_code=409, detail="This username is already taken. Please choose another.")
     if db.query(DbUser).filter(DbUser.email == request.email).first():
