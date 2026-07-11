@@ -12,18 +12,22 @@ async def login(request : OAuth2PasswordRequestForm = Depends(),db: Session = De
     # OAuth2PasswordRequestForm always names this field "username" per spec,
     # but the value itself can be either a username or an email - look up
     # by whichever one matches.
-    identifier = request.username
+    identifier = (request.username or "").strip()
+    if not identifier:
+        raise HTTPException(status_code=400, detail="Please enter your username or email.")
+
+    request_password = request.password
+    if not request_password:
+        raise HTTPException(status_code=400, detail="Please enter your password.")
+
     user = db.query(DbUser).filter(
         (DbUser.username == identifier) | (DbUser.email == identifier)
     ).first()
     if not user:
-       raise HTTPException(status_code=404, detail="Incorrect username or email")
+       raise HTTPException(status_code=401, detail="No account found with that username or email.")
 
-    request_password=request.password
-    if not request_password:
-        raise HTTPException(status_code=404, detail="please specify password")
     if not HashedPassword.verify_password(request_password, user.password):
-        raise HTTPException(status_code=404, detail="Incorrect  password")
+        raise HTTPException(status_code=401, detail="Incorrect password. Please try again.")
 
     access_token = oauth2.create_access_token(data={"username":user.username})
 

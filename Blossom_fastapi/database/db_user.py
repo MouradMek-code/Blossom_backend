@@ -1,11 +1,20 @@
 from fastapi import HTTPException
-from sqlalchemy.testing.pickleable import User
+from sqlalchemy.exc import IntegrityError
 from methods import HashedPassword
 from database.models import DbUser
 from routers.schemas import UserBase
 from sqlalchemy.orm import Session
 from auth import oauth2
 def create_user(db : Session,request:UserBase):
+
+    # Explicit duplicate checks so the client gets a clear 409 with a
+    # specific message instead of a raw 500 from the DB unique constraint.
+    if db.query(DbUser).filter(DbUser.username == request.username).first():
+        raise HTTPException(status_code=409, detail="This username is already taken. Please choose another.")
+    if db.query(DbUser).filter(DbUser.email == request.email).first():
+        raise HTTPException(status_code=409, detail="An account with this email already exists. Try logging in instead.")
+    if request.phone_number and db.query(DbUser).filter(DbUser.phone_number == request.phone_number).first():
+        raise HTTPException(status_code=409, detail="An account with this phone number already exists.")
 
     new_user = DbUser(
 
@@ -16,9 +25,14 @@ def create_user(db : Session,request:UserBase):
     password=HashedPassword.HashedPassword.hash_password(request.password)
     )
     access_token = oauth2.create_access_token(data={"username": request.username})
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
+    try:
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+    except IntegrityError:
+        # Fallback in case of a race between the check above and commit.
+        db.rollback()
+        raise HTTPException(status_code=409, detail="An account with these details already exists.")
 
 
     return {"username":new_user.username,"email":new_user.email,"phone_number":new_user.phone_number,"access_token":access_token}
