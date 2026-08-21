@@ -534,6 +534,11 @@ async def send_email_verification(request:UserBase,db:Session = Depends(get_db))
 
 @router.post("/resend_email")
 async def resend_email_verification(email: str, phone_number: str, db: Session = Depends(get_db)):
+    # Also used when the user corrects a mistyped email from the verification
+    # screen, so re-check the address isn't already registered before sending
+    # a new code to it.
+    if db.query(DbUser).filter(DbUser.email == email).first():
+        raise HTTPException(status_code=409, detail="An account with this email already exists. Try logging in instead.")
     otp = str(random.randint(100000, 999999))
     clean_phone = re.sub(r'[^\d+]', '', phone_number.replace('tel:', ''))
     result = await send_email_otp(email, clean_phone, otp)
