@@ -1,12 +1,14 @@
+from typing import List
+
 from fastapi import APIRouter
 from fastapi import Depends
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from auth.oauth2 import get_current_user
 from database.database import get_db
 from database import db_like
-from routers.schemas import UserAuth
+from routers.schemas import UserAuth, ProfileDisplay
 from database.models import DbProfileLike,DbProfile,DbMatch
 
 router = APIRouter(
@@ -66,6 +68,48 @@ def profile_liker(db: Session = Depends(get_db),
     for profilesliker in profileslikers:
         profileslikersid.append(profilesliker.liker_profile_id)
     return profileslikersid
+
+@router.get("/profile_likes/profiles", response_model=List[ProfileDisplay])
+def profile_likers_full(db: Session = Depends(get_db),
+    current_user: UserAuth = Depends(get_current_user)
+):
+    """Same set as /profile_likes but returns the full profiles in one call.
+
+    The clients used to take the id list from /profile_likes and then fire one
+    GET /profile/{id} per liker, which meant N round-trips to render the page.
+    """
+    profile = db.query(DbProfile).filter(DbProfile.user_id == current_user.id).first()
+    if not profile:
+        return []
+
+    matched = db.query(DbMatch).filter(
+        (DbMatch.profile1_id == profile.id) |
+        (DbMatch.profile2_id == profile.id)
+    ).all()
+    matched_ids = [
+        m.profile2_id if m.profile1_id == profile.id else m.profile1_id
+        for m in matched
+    ]
+
+    liker_ids = [
+        liker_id for (liker_id,) in db.query(DbProfileLike.liker_profile_id).filter(
+            DbProfileLike.liked_profile_id == profile.id,
+            ~DbProfileLike.liker_profile_id.in_(matched_ids) if matched_ids else True,
+        ).all()
+    ]
+    if not liker_ids:
+        return []
+
+    return (
+        db.query(DbProfile)
+        .options(
+            selectinload(DbProfile.photos),
+            selectinload(DbProfile.languages),
+            selectinload(DbProfile.learning_languages),
+        )
+        .filter(DbProfile.id.in_(liker_ids))
+        .all()
+    )
 
 @router.get("/profiles_i_liked")
 def profiles_i_liked(

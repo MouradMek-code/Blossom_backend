@@ -1,6 +1,6 @@
 from database.models import  DbProfile,DbProfileLike,DbConversation,DbProfilePhoto,DbLanguage,DbMessage,DbUser
 from routers.schemas import ProfileBase, UserAuth
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from datetime import datetime
 from database.models import DbMatch
 from database import db_block
@@ -89,18 +89,25 @@ def get_all_profiles(db: Session, user: UserAuth):
 
     excluded_profile_ids.update(db_block.get_block_relation_ids(db, current_profile.id))
 
-    # Exclude admin accounts from browse
-    admin_user_ids = [
-        u.id for u in db.query(DbUser).filter(DbUser.is_admin == True).all()
+    # Exclude admin accounts from browse (single join instead of two queries)
+    admin_profile_ids = [
+        p_id for (p_id,) in db.query(DbProfile.id)
+        .join(DbUser, DbUser.id == DbProfile.user_id)
+        .filter(DbUser.is_admin == True)
+        .all()
     ]
-    if admin_user_ids:
-        admin_profile_ids = [
-            p.id for p in db.query(DbProfile).filter(DbProfile.user_id.in_(admin_user_ids)).all()
-        ]
-        excluded_profile_ids.update(admin_profile_ids)
+    excluded_profile_ids.update(admin_profile_ids)
 
+    # ProfileDisplay serialises photos/languages/learning_languages, which are
+    # lazy relationships - without eager loading this fires 3 extra queries per
+    # profile (1 + 3N). selectinload batches them into 3 queries total.
     profiles = (
         db.query(DbProfile)
+        .options(
+            selectinload(DbProfile.photos),
+            selectinload(DbProfile.languages),
+            selectinload(DbProfile.learning_languages),
+        )
         .filter(
             DbProfile.id.notin_(excluded_profile_ids)
         )
@@ -110,7 +117,16 @@ def get_all_profiles(db: Session, user: UserAuth):
     return profiles
 
 def get_profile_by_id(db:Session,id:int):
-    return db.query(DbProfile).filter(DbProfile.id == id).first()
+    return (
+        db.query(DbProfile)
+        .options(
+            selectinload(DbProfile.photos),
+            selectinload(DbProfile.languages),
+            selectinload(DbProfile.learning_languages),
+        )
+        .filter(DbProfile.id == id)
+        .first()
+    )
 def update_profile(db:Session,user:UserAuth,city:str,country:str):
 
     profile_db=db.query(DbProfile).filter(DbProfile.user_id == user.id)
@@ -168,10 +184,20 @@ def get_profiles_matched(db:Session,user:UserAuth):
             profiles_id.append(match.profile1_id)
         elif match.profile2_id != profile_db.id:
             profiles_id.append(match.profile2_id)
-    profiles=[]
-    for profile_id in profiles_id:
-        profiles.append(db.query(DbProfile).filter(DbProfile.id == profile_id).first())
-    return profiles
+    if not profiles_id:
+        return []
+    # One IN query with eager-loaded relationships, instead of a query per
+    # match plus 3 lazy loads each while serialising ProfileDisplay.
+    return (
+        db.query(DbProfile)
+        .options(
+            selectinload(DbProfile.photos),
+            selectinload(DbProfile.languages),
+            selectinload(DbProfile.learning_languages),
+        )
+        .filter(DbProfile.id.in_(profiles_id))
+        .all()
+    )
 
 def get_or_create_conversation(
     db: Session,
