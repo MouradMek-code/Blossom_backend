@@ -376,3 +376,24 @@ class ResetPasswordRequest(BaseModel):
     otp: str
     new_password: str = Field(min_length=8, max_length=100)
 
+
+
+class DateSpotAuthor(BaseModel):
+    first_name: Optional[str] = None
+
+    class Config:
+        orm_mode = True
+
+
+class DateSpotDisplay(BaseModel):
+    id: int
+    name: str
+    city: str
+    country: str
+    description: str
+    image_url: Optional[str] = None
+    created_at: Optional[datetime] = None
+    profile: Optional[DateSpotAuthor] = None
+
+    class Config:
+        orm_mode = True

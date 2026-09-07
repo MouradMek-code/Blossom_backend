@@ -360,3 +360,32 @@ class DbReport(Base):
         DateTime,
         default=datetime.utcnow
     )
+
+class DbDateSpot(Base):
+    """A place a user actually had a good date at, shared with the community."""
+
+    __tablename__ = "date_spots"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    name = Column(String(150), nullable=False)
+    city = Column(String(120), nullable=False, index=True)
+    country = Column(String(120), nullable=False, index=True)
+    description = Column(Text, nullable=False)
+
+    image_url = Column(String(500), nullable=True)
+    public_id = Column(String(255), nullable=True)
+
+    # Author. Kept nullable-on-delete so removing an account doesn't wipe
+    # useful community content - the spot simply loses its attribution.
+    profile_id = Column(
+        Integer,
+        ForeignKey("profiles.id", ondelete="SET NULL"),
+        nullable=True
+    )
+    profile = relationship("DbProfile")
+
+    created_at = Column(
+        DateTime,
+        default=datetime.utcnow
+    )
