@@ -392,6 +392,7 @@ class DateSpotDisplay(BaseModel):
     country: str
     description: str
     image_url: Optional[str] = None
+    map_url: Optional[str] = None
     created_at: Optional[datetime] = None
     profile: Optional[DateSpotAuthor] = None
 

@@ -376,6 +376,9 @@ class DbDateSpot(Base):
     image_url = Column(String(500), nullable=True)
     public_id = Column(String(255), nullable=True)
 
+    # Optional Google Maps link so people can actually navigate there.
+    map_url = Column(String(500), nullable=True)
+
     # Author. Kept nullable-on-delete so removing an account doesn't wipe
     # useful community content - the spot simply loses its attribution.
     profile_id = Column(

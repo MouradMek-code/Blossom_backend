@@ -63,6 +63,9 @@ with engine.begin() as connection:
     connection.execute(text(
         "ALTER TABLE \"user\" ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false"
     ))
+    connection.execute(text(
+        "ALTER TABLE date_spots ADD COLUMN IF NOT EXISTS map_url VARCHAR(500)"
+    ))
 
 app.add_middleware(
     CORSMiddleware,

@@ -1,5 +1,6 @@
 import os
 from typing import List, Optional
+from urllib.parse import urlparse
 
 import cloudinary
 import cloudinary.uploader
@@ -21,6 +22,38 @@ router = APIRouter(
     prefix="/date_spots",
     tags=["date spots"],
 )
+
+# Only allow genuine Google Maps links. This is user-generated content shown to
+# everyone, so accepting arbitrary URLs would turn the page into a phishing
+# vector; restricting the host keeps the "Open in Maps" button trustworthy.
+_MAP_HOSTS = ("google.com", "goo.gl", "maps.app.goo.gl", "maps.google.com")
+
+
+def _clean_map_url(raw: Optional[str]) -> Optional[str]:
+    value = (raw or "").strip()
+    if not value:
+        return None
+    parsed = urlparse(value)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise HTTPException(
+            status_code=400,
+            detail="Please paste a valid Google Maps link, or leave it empty.",
+        )
+    host = parsed.netloc.lower().split(":")[0]
+    if host.startswith("www."):
+        host = host[4:]
+    allowed = (
+        host in _MAP_HOSTS
+        or host.endswith(".google.com")
+        or host.startswith("google.")          # google.fr, google.co.uk, ...
+        or host.endswith(".goo.gl")
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=400,
+            detail="Please paste a valid Google Maps link, or leave it empty.",
+        )
+    return value[:500]
 
 
 @router.get("", response_model=List[DateSpotDisplay])
@@ -57,6 +90,7 @@ async def create_date_spot(
     city: str = Form(...),
     country: str = Form(...),
     description: str = Form(...),
+    map_url: Optional[str] = Form(None),
     image: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
     current_user: UserAuth = Depends(get_current_user),
@@ -75,6 +109,8 @@ async def create_date_spot(
             status_code=400,
             detail="Please add a short description (at least 10 characters).",
         )
+
+    map_link = _clean_map_url(map_url)
 
     profile = db.query(DbProfile).filter(DbProfile.user_id == current_user.id).first()
     if not profile:
@@ -100,6 +136,7 @@ async def create_date_spot(
         description=description,
         image_url=image_url,
         public_id=public_id,
+        map_url=map_link,
         profile_id=profile.id,
     )
     db.add(spot)
