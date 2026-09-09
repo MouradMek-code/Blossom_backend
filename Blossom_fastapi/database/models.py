@@ -379,6 +379,10 @@ class DbDateSpot(Base):
     # Optional Google Maps link so people can actually navigate there.
     map_url = Column(String(500), nullable=True)
 
+    # Vibe tag, drawn from the same list as a profile's first_date_preference
+    # so spots and people speak the same language.
+    category = Column(String(60), nullable=True, index=True)
+
     # Author. Kept nullable-on-delete so removing an account doesn't wipe
     # useful community content - the spot simply loses its attribution.
     profile_id = Column(

@@ -28,6 +28,24 @@ router = APIRouter(
 # vector; restricting the host keeps the "Open in Maps" button trustworthy.
 _MAP_HOSTS = ("google.com", "goo.gl", "maps.app.goo.gl", "maps.google.com")
 
+# Vibe tags. Deliberately the place-shaped subset of a profile's
+# first_date_preference options, so a spot's tag and a person's preference are
+# directly comparable later on.
+CATEGORIES = [
+    "Coffee",
+    "Restaurant",
+    "Drinks / Bar",
+    "Walk / Outdoors",
+    "Hiking / Nature",
+    "Bowling",
+    "Mini Golf",
+    "Arcade / Gaming",
+    "Movie",
+    "Museum / Art Gallery",
+    "Beach",
+    "Concert / Live Music",
+]
+
 
 def _clean_map_url(raw: Optional[str]) -> Optional[str]:
     value = (raw or "").strip()
@@ -60,6 +78,7 @@ def _clean_map_url(raw: Optional[str]) -> Optional[str]:
 def list_date_spots(
     country: Optional[str] = None,
     city: Optional[str] = None,
+    category: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     """Public listing so the city pages are browsable (and indexable)."""
@@ -68,6 +87,8 @@ def list_date_spots(
         query = query.filter(DbDateSpot.country == country)
     if city:
         query = query.filter(DbDateSpot.city == city)
+    if category:
+        query = query.filter(DbDateSpot.category == category)
     return query.order_by(DbDateSpot.created_at.desc()).all()
 
 
@@ -84,6 +105,12 @@ def list_locations(db: Session = Depends(get_db)):
     ]
 
 
+@router.get("/categories")
+def list_categories():
+    """The allowed vibe tags, so clients don't hardcode their own list."""
+    return CATEGORIES
+
+
 @router.post("", response_model=DateSpotDisplay)
 async def create_date_spot(
     name: str = Form(...),
@@ -91,6 +118,7 @@ async def create_date_spot(
     country: str = Form(...),
     description: str = Form(...),
     map_url: Optional[str] = Form(None),
+    category: Optional[str] = Form(None),
     image: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
     current_user: UserAuth = Depends(get_current_user),
@@ -111,6 +139,10 @@ async def create_date_spot(
         )
 
     map_link = _clean_map_url(map_url)
+
+    spot_category = (category or "").strip() or None
+    if spot_category and spot_category not in CATEGORIES:
+        raise HTTPException(status_code=400, detail="Please pick a valid category.")
 
     profile = db.query(DbProfile).filter(DbProfile.user_id == current_user.id).first()
     if not profile:
@@ -137,6 +169,7 @@ async def create_date_spot(
         image_url=image_url,
         public_id=public_id,
         map_url=map_link,
+        category=spot_category,
         profile_id=profile.id,
     )
     db.add(spot)
