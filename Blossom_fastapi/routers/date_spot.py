@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 from auth.oauth2 import get_current_user
 from database.database import get_db
 from database.models import DbDateSpot, DbProfile, DbUser
-from routers.schemas import DateSpotDisplay, UserAuth
+from routers.schemas import DateSpotDisplay, DateSpotStatsUpdate, UserAuth
 
 cloudinary.config(
     cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
@@ -169,6 +169,31 @@ def date_spot_stats(
         }
         for s in spots
     ]
+
+
+@router.patch("/{spot_id}/stats", response_model=DateSpotDisplay)
+def set_date_spot_stats(
+    spot_id: int,
+    payload: DateSpotStatsUpdate,
+    db: Session = Depends(get_db),
+    current_user: UserAuth = Depends(get_current_user),
+):
+    """Admin: set a spot's counters directly (seeding, corrections)."""
+    if not getattr(current_user, "is_admin", False):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    spot = db.query(DbDateSpot).filter(DbDateSpot.id == spot_id).first()
+    if not spot:
+        raise HTTPException(status_code=404, detail="That place no longer exists.")
+
+    if payload.view_count is not None:
+        spot.view_count = payload.view_count
+    if payload.map_click_count is not None:
+        spot.map_click_count = payload.map_click_count
+
+    db.commit()
+    db.refresh(spot)
+    return spot
 
 
 @router.post("", response_model=DateSpotDisplay)

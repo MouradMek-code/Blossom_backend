@@ -385,6 +385,12 @@ class DateSpotAuthor(BaseModel):
         orm_mode = True
 
 
+class DateSpotStatsUpdate(BaseModel):
+    """Admin-set counters, e.g. to seed a venue's numbers."""
+    view_count: Optional[int] = Field(default=None, ge=0)
+    map_click_count: Optional[int] = Field(default=None, ge=0)
+
+
 class DateSpotDisplay(BaseModel):
     id: int
     name: str
@@ -394,6 +400,8 @@ class DateSpotDisplay(BaseModel):
     image_url: Optional[str] = None
     map_url: Optional[str] = None
     category: Optional[str] = None
+    view_count: int = 0
+    map_click_count: int = 0
     created_at: Optional[datetime] = None
     profile: Optional[DateSpotAuthor] = None
 
