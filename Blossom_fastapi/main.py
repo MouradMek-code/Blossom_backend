@@ -69,6 +69,12 @@ with engine.begin() as connection:
     connection.execute(text(
         "ALTER TABLE date_spots ADD COLUMN IF NOT EXISTS category VARCHAR(60)"
     ))
+    connection.execute(text(
+        "ALTER TABLE date_spots ADD COLUMN IF NOT EXISTS view_count INTEGER NOT NULL DEFAULT 0"
+    ))
+    connection.execute(text(
+        "ALTER TABLE date_spots ADD COLUMN IF NOT EXISTS map_click_count INTEGER NOT NULL DEFAULT 0"
+    ))
 
 app.add_middleware(
     CORSMiddleware,

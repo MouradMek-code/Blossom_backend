@@ -111,6 +111,66 @@ def list_categories():
     return CATEGORIES
 
 
+def _bump(db: Session, spot_id: int, column):
+    """Increment a counter in SQL so concurrent hits don't overwrite each other."""
+    updated = (
+        db.query(DbDateSpot)
+        .filter(DbDateSpot.id == spot_id)
+        .update({column: column + 1}, synchronize_session=False)
+    )
+    db.commit()
+    return updated
+
+
+@router.post("/{spot_id}/view")
+def track_view(spot_id: int, db: Session = Depends(get_db)):
+    """Someone opened this spot's detail view. Fire-and-forget from the client."""
+    if not _bump(db, spot_id, DbDateSpot.view_count):
+        raise HTTPException(status_code=404, detail="That place no longer exists.")
+    return {"ok": True}
+
+
+@router.post("/{spot_id}/map_click")
+def track_map_click(spot_id: int, db: Session = Depends(get_db)):
+    """Someone tapped through to Google Maps - i.e. intends to actually go."""
+    if not _bump(db, spot_id, DbDateSpot.map_click_count):
+        raise HTTPException(status_code=404, detail="That place no longer exists.")
+    return {"ok": True}
+
+
+@router.get("/admin/stats")
+def date_spot_stats(
+    db: Session = Depends(get_db),
+    current_user: UserAuth = Depends(get_current_user),
+):
+    """Engagement per spot, admin only.
+
+    Kept out of the public payload on purpose: with low traffic, showing a venue
+    "4 views, 0 directions" would undercut the pitch rather than support it.
+    Look here first, and only show owners the numbers once they're flattering.
+    """
+    if not getattr(current_user, "is_admin", False):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    spots = (
+        db.query(DbDateSpot)
+        .order_by(DbDateSpot.map_click_count.desc(), DbDateSpot.view_count.desc())
+        .all()
+    )
+    return [
+        {
+            "id": s.id,
+            "name": s.name,
+            "city": s.city,
+            "country": s.country,
+            "category": s.category,
+            "views": s.view_count or 0,
+            "map_clicks": s.map_click_count or 0,
+        }
+        for s in spots
+    ]
+
+
 @router.post("", response_model=DateSpotDisplay)
 async def create_date_spot(
     name: str = Form(...),

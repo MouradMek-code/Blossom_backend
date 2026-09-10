@@ -383,6 +383,13 @@ class DbDateSpot(Base):
     # so spots and people speak the same language.
     category = Column(String(60), nullable=True, index=True)
 
+    # Engagement counters, so a venue can eventually be shown proof the listing
+    # is worth something. view_count is curiosity; map_click_count is intent to
+    # actually go, which is the number an owner really cares about.
+    # Deliberately not exposed publicly yet - see the admin stats endpoint.
+    view_count = Column(Integer, default=0, nullable=False)
+    map_click_count = Column(Integer, default=0, nullable=False)
+
     # Author. Kept nullable-on-delete so removing an account doesn't wipe
     # useful community content - the spot simply loses its attribution.
     profile_id = Column(
