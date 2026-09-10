@@ -73,6 +73,22 @@ async def verify_user(request:UserBase,db:Session = Depends(get_db)):
 def get_all_users(db:Session = Depends(get_db)):
     return db_user.get_all_users(db)
 
+# Must stay above GET /{id}: FastAPI matches in declaration order, so if the
+# int path came first "me" would be parsed as an id and 422.
+@router.get('/me')
+def get_me(current_user: UserAuth = Depends(get_current_user)):
+    """Who am I? Lets the clients decide whether to show admin-only controls.
+
+    The token only carries the username, so without this the frontends have
+    no way to tell an admin apart from a normal user.
+    """
+    return {
+        "id": current_user.id,
+        "username": current_user.username,
+        "email": current_user.email,
+        "is_admin": bool(getattr(current_user, "is_admin", False)),
+    }
+
 @router.get('/{id}', response_model=UserDisplay)
 def get_user_by_id(id:int,db:Session = Depends(get_db)):
     return db_user.get_user_by_id(db,id)
