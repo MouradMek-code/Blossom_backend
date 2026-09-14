@@ -1,7 +1,7 @@
 from fastapi import HTTPException
 from database.models import DbPost,DbMessage,DbConversation,DbMatch,DbProfile
 from routers.schemas import UserBase, PostBase
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from datetime import datetime
 from database import db_block
 
@@ -29,8 +29,11 @@ def send_message(
     db: Session,
     conversation_id: int,
     profile_id: int,
-    content: str
+    content: str,
+    date_spot_id: int = None
 ):
+    # Date spot invites come through here too, so they obey exactly the same
+    # rules as typed messages: access, blocks, and who may write first.
     conversation = get_conversation_for_profile(db, conversation_id, profile_id)
     if not conversation:
         raise HTTPException(
@@ -63,7 +66,8 @@ def send_message(
     message = DbMessage(
         conversation_id=conversation_id,
         sender_profile_id=profile_id,
-        content=content
+        content=content,
+        date_spot_id=date_spot_id
     )
 
     db.add(message)
@@ -80,6 +84,9 @@ def get_my_conversations(
     return (
         db.query(DbConversation)
         .join(DbMatch)
+        .options(
+            selectinload(DbConversation.messages).selectinload(DbMessage.date_spot)
+        )
         .filter(
             (DbMatch.profile1_id == profile_id)
             |
@@ -102,6 +109,9 @@ def get_messages(
 
     return (
         db.query(DbMessage)
+        # Chat polls this every few seconds; load invite cards' spots in one
+        # extra query instead of one per invite.
+        .options(selectinload(DbMessage.date_spot))
         .filter(
             DbMessage.conversation_id == conversation_id
         )

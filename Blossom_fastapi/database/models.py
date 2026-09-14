@@ -280,6 +280,16 @@ class DbMessage(Base):
         nullable=False
     )
 
+    # Set when the message is a "let's go here" date spot invite, so clients
+    # can render the place as a card. content still carries a readable line,
+    # which is what older app versions that don't know about invites show.
+    date_spot_id = Column(
+        Integer,
+        ForeignKey("date_spots.id", ondelete="SET NULL"),
+        nullable=True
+    )
+    date_spot = relationship("DbDateSpot")
+
     created_at = Column(
         DateTime,
         default=datetime.utcnow
@@ -383,10 +393,22 @@ class DbDateSpot(Base):
     # so spots and people speak the same language.
     category = Column(String(60), nullable=True, index=True)
 
-    # Engagement counters, so a venue can eventually be shown proof the listing
-    # is worth something. view_count is curiosity; map_click_count is intent to
+    # Optional area within the city ("Le Marais", "Châtelet"). Kept apart from
+    # city on purpose: when people typed neighborhoods into the city field,
+    # Paris got split into several fake "cities" in the filters.
+    neighborhood = Column(String(120), nullable=True)
+
+    # "Free", "€", "€€" or "€€€" - see PRICES in routers/date_spot.py.
+    price = Column(String(8), nullable=True)
+
+    # Comma-separated subset of BEST_FOR in routers/date_spot.py, e.g.
+    # "First date,Casual". A plain string rather than an array type so it
+    # stays portable and trivially filterable.
+    best_for = Column(String(120), nullable=True)
+
+    # Engagement counters, so a venue can be shown proof the listing is worth
+    # something. view_count is curiosity; map_click_count is intent to
     # actually go, which is the number an owner really cares about.
-    # Deliberately not exposed publicly yet - see the admin stats endpoint.
     view_count = Column(Integer, default=0, nullable=False)
     map_click_count = Column(Integer, default=0, nullable=False)
 

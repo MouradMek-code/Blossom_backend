@@ -8,7 +8,7 @@ import json
 from vonage import Auth, Vonage
 from vonage_messages import Sms
 from routers.schemas import VerifyOTPRequest, ForgotPasswordRequest, ResetPasswordRequest
-from database.models import DbUser
+from database.models import DbUser, DbProfile
 from datetime import datetime, timedelta
 from database import db_user, db_profile
 from database.database import get_db
@@ -76,17 +76,20 @@ def get_all_users(db:Session = Depends(get_db)):
 # Must stay above GET /{id}: FastAPI matches in declaration order, so if the
 # int path came first "me" would be parsed as an id and 422.
 @router.get('/me')
-def get_me(current_user: UserAuth = Depends(get_current_user)):
-    """Who am I? Lets the clients decide whether to show admin-only controls.
+def get_me(db: Session = Depends(get_db), current_user: UserAuth = Depends(get_current_user)):
+    """Who am I? Lets the clients decide whether to show admin-only or
+    author-only controls.
 
     The token only carries the username, so without this the frontends have
     no way to tell an admin apart from a normal user.
     """
+    profile = db.query(DbProfile).filter(DbProfile.user_id == current_user.id).first()
     return {
         "id": current_user.id,
         "username": current_user.username,
         "email": current_user.email,
         "is_admin": bool(getattr(current_user, "is_admin", False)),
+        "profile_id": profile.id if profile else None,
     }
 
 @router.get('/{id}', response_model=UserDisplay)

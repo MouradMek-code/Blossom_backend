@@ -1,6 +1,7 @@
 import os
-from typing import List, Optional
-from urllib.parse import urlparse
+import unicodedata
+from typing import List, Optional, Union
+from urllib.parse import quote_plus, urlparse
 
 import cloudinary
 import cloudinary.uploader
@@ -8,9 +9,19 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session, selectinload
 
 from auth.oauth2 import get_current_user
+from database import db_message, db_profile
 from database.database import get_db
-from database.models import DbDateSpot, DbProfile, DbUser
-from routers.schemas import DateSpotDisplay, DateSpotStatsUpdate, UserAuth
+from database.models import DbDateSpot, DbMatch, DbProfile, DbUser
+from database.starter_spots import STARTER_CITY, STARTER_COUNTRY, STARTER_SPOTS
+from routers.schemas import (
+    DateSpotDisplay,
+    DateSpotInvite,
+    DateSpotInviteResult,
+    DateSpotStatsUpdate,
+    DateSpotUpdate,
+    MessageDisplay,
+    UserAuth,
+)
 
 cloudinary.config(
     cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
@@ -46,6 +57,12 @@ CATEGORIES = [
     "Concert / Live Music",
 ]
 
+# Rough cost per person. Canonical values - clients translate "Free" for display.
+PRICES = ["Free", "€", "€€", "€€€"]
+
+# What kind of date a place suits. A spot can have several.
+BEST_FOR = ["First date", "Romantic", "Casual", "Adventurous"]
+
 
 def _clean_map_url(raw: Optional[str]) -> Optional[str]:
     value = (raw or "").strip()
@@ -74,11 +91,119 @@ def _clean_map_url(raw: Optional[str]) -> Optional[str]:
     return value[:500]
 
 
+def _maps_search_url(query: str) -> str:
+    return "https://www.google.com/maps/search/?api=1&query=" + quote_plus(query)
+
+
+def _fold(value: Optional[str]) -> str:
+    """Comparison key ignoring case, accents and extra spaces: "Châtelet" == "chatelet "."""
+    text = unicodedata.normalize("NFKD", value or "")
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    return " ".join(text.lower().split())
+
+
+def _tidy(value: Optional[str], max_len: int) -> str:
+    """Trim and collapse runs of whitespace."""
+    return " ".join((value or "").split())[:max_len]
+
+
+def _capitalize(value: str) -> str:
+    return value[:1].upper() + value[1:]
+
+
+def _canonical_place(db: Session, city: str, country: str):
+    """Reuse the spelling already on file for a city/country.
+
+    Without this, "paris", "PARIS" and "Paris" each became a separate entry in
+    the filters. Brand-new places just get a capital first letter.
+    """
+    city = _capitalize(_tidy(city, 120))
+    country = _capitalize(_tidy(country, 120))
+    known = db.query(DbDateSpot.country, DbDateSpot.city).distinct().all()
+    for known_country, _ in known:
+        if _fold(known_country) == _fold(country):
+            country = known_country
+            break
+    for known_country, known_city in known:
+        if known_country == country and _fold(known_city) == _fold(city):
+            city = known_city
+            break
+    return city, country
+
+
+def _clean_neighborhood(raw: Optional[str], city: str) -> Optional[str]:
+    value = _capitalize(_tidy(raw, 120))
+    # "Paris" typed as the neighborhood of Paris adds nothing.
+    if not value or _fold(value) == _fold(city):
+        return None
+    return value
+
+
+def _clean_category(raw: Optional[str]) -> Optional[str]:
+    value = (raw or "").strip()
+    if not value:
+        return None
+    if value not in CATEGORIES:
+        raise HTTPException(status_code=400, detail="Please pick a valid category.")
+    return value
+
+
+def _clean_price(raw: Optional[str]) -> Optional[str]:
+    value = (raw or "").strip()
+    if not value:
+        return None
+    if value not in PRICES:
+        raise HTTPException(status_code=400, detail="Please pick a valid price.")
+    return value
+
+
+def _clean_best_for(raw: Union[str, List[str], None]) -> Optional[str]:
+    """Accepts "First date,Casual" (multipart forms) or a list (JSON).
+
+    Returns the stored form - comma-separated, in BEST_FOR order - or None.
+    """
+    parts = raw.split(",") if isinstance(raw, str) else (raw or [])
+    picked = {part.strip() for part in parts if part and part.strip()}
+    if picked - set(BEST_FOR):
+        raise HTTPException(status_code=400, detail="Please pick valid 'best for' tags.")
+    return ",".join(tag for tag in BEST_FOR if tag in picked) or None
+
+
+def _require_admin(current_user: UserAuth):
+    if not getattr(current_user, "is_admin", False):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+
+def _can_manage(db: Session, spot: DbDateSpot, current_user: UserAuth) -> bool:
+    """Authors manage their own spots; admins manage any (moderation, fixes)."""
+    if getattr(current_user, "is_admin", False):
+        return True
+    profile = db.query(DbProfile).filter(DbProfile.user_id == current_user.id).first()
+    return profile is not None and spot.profile_id == profile.id
+
+
+def _get_spot(db: Session, spot_id: int) -> DbDateSpot:
+    spot = db.query(DbDateSpot).filter(DbDateSpot.id == spot_id).first()
+    if not spot:
+        raise HTTPException(status_code=404, detail="That place no longer exists.")
+    return spot
+
+
+def _upload_image(image: UploadFile):
+    try:
+        result = cloudinary.uploader.upload(image.file)
+        return result["secure_url"], result["public_id"]
+    except Exception:
+        raise HTTPException(status_code=400, detail="We couldn't upload that photo. Please try another one.")
+
+
 @router.get("", response_model=List[DateSpotDisplay])
 def list_date_spots(
     country: Optional[str] = None,
     city: Optional[str] = None,
     category: Optional[str] = None,
+    price: Optional[str] = None,
+    best_for: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     """Public listing so the city pages are browsable (and indexable)."""
@@ -89,7 +214,17 @@ def list_date_spots(
         query = query.filter(DbDateSpot.city == city)
     if category:
         query = query.filter(DbDateSpot.category == category)
-    return query.order_by(DbDateSpot.created_at.desc()).all()
+    if price:
+        query = query.filter(DbDateSpot.price == price)
+    if best_for in BEST_FOR:
+        # Tags never contain one another, so a substring match is exact enough.
+        query = query.filter(DbDateSpot.best_for.ilike(f"%{best_for}%"))
+    # Spots with a photo first - it's a visual page and the first spot becomes
+    # the featured hero - then newest first.
+    return query.order_by(
+        DbDateSpot.image_url.is_(None),
+        DbDateSpot.created_at.desc(),
+    ).all()
 
 
 @router.get("/locations")
@@ -143,14 +278,8 @@ def date_spot_stats(
     db: Session = Depends(get_db),
     current_user: UserAuth = Depends(get_current_user),
 ):
-    """Engagement per spot, admin only.
-
-    Kept out of the public payload on purpose: with low traffic, showing a venue
-    "4 views, 0 directions" would undercut the pitch rather than support it.
-    Look here first, and only show owners the numbers once they're flattering.
-    """
-    if not getattr(current_user, "is_admin", False):
-        raise HTTPException(status_code=403, detail="Admin access required")
+    """Engagement per spot, admin only, best performers first."""
+    _require_admin(current_user)
 
     spots = (
         db.query(DbDateSpot)
@@ -171,6 +300,47 @@ def date_spot_stats(
     ]
 
 
+@router.post("/admin/seed")
+def seed_starter_spots(
+    db: Session = Depends(get_db),
+    current_user: UserAuth = Depends(get_current_user),
+):
+    """Admin: add the curated starter spots from database/starter_spots.py.
+
+    Safe to run more than once - places already listed in the city (by name,
+    ignoring case and accents) are skipped. Seeded spots have no author.
+    """
+    _require_admin(current_user)
+
+    city, country = _canonical_place(db, STARTER_CITY, STARTER_COUNTRY)
+    existing = {
+        (_fold(name), _fold(spot_city))
+        for name, spot_city in db.query(DbDateSpot.name, DbDateSpot.city).all()
+    }
+
+    added = 0
+    for item in STARTER_SPOTS:
+        key = (_fold(item["name"]), _fold(city))
+        if key in existing:
+            continue
+        db.add(DbDateSpot(
+            name=item["name"],
+            city=city,
+            country=country,
+            neighborhood=_clean_neighborhood(item.get("neighborhood"), city),
+            description=item["description"],
+            category=_clean_category(item.get("category")),
+            price=_clean_price(item.get("price")),
+            best_for=_clean_best_for(item.get("best_for")),
+            map_url=_maps_search_url(item.get("maps_query") or f"{item['name']}, {city}"),
+        ))
+        existing.add(key)
+        added += 1
+
+    db.commit()
+    return {"added": added, "skipped": len(STARTER_SPOTS) - added}
+
+
 @router.patch("/{spot_id}/stats", response_model=DateSpotDisplay)
 def set_date_spot_stats(
     spot_id: int,
@@ -179,12 +349,8 @@ def set_date_spot_stats(
     current_user: UserAuth = Depends(get_current_user),
 ):
     """Admin: set a spot's counters directly (seeding, corrections)."""
-    if not getattr(current_user, "is_admin", False):
-        raise HTTPException(status_code=403, detail="Admin access required")
-
-    spot = db.query(DbDateSpot).filter(DbDateSpot.id == spot_id).first()
-    if not spot:
-        raise HTTPException(status_code=404, detail="That place no longer exists.")
+    _require_admin(current_user)
+    spot = _get_spot(db, spot_id)
 
     if payload.view_count is not None:
         spot.view_count = payload.view_count
@@ -196,26 +362,68 @@ def set_date_spot_stats(
     return spot
 
 
+@router.post("/{spot_id}/invite", response_model=DateSpotInviteResult)
+def invite_to_date_spot(
+    spot_id: int,
+    payload: DateSpotInvite,
+    db: Session = Depends(get_db),
+    current_user: UserAuth = Depends(get_current_user),
+):
+    """Send this spot to a match as a chat message ("let's go here?").
+
+    Goes through the normal message path, so blocks and the rule that the
+    woman writes first in a man/woman match still apply.
+    """
+    spot = _get_spot(db, spot_id)
+
+    profile = db.query(DbProfile).filter(DbProfile.user_id == current_user.id).first()
+    if not profile:
+        raise HTTPException(status_code=400, detail="Finish creating your profile first.")
+
+    other_id = payload.profile_id
+    matched = (
+        db.query(DbMatch)
+        .filter(
+            ((DbMatch.profile1_id == profile.id) & (DbMatch.profile2_id == other_id))
+            | ((DbMatch.profile1_id == other_id) & (DbMatch.profile2_id == profile.id))
+        )
+        .first()
+    )
+    if not matched:
+        raise HTTPException(status_code=403, detail="You can only invite people you've matched with.")
+
+    conversation_id = db_profile.get_or_create_conversation(db, current_user, other_id)["conversation_id"]
+    content = _tidy(payload.content, 500) or f"Want to go to {spot.name} together?"
+    message = db_message.send_message(
+        db, conversation_id, profile.id, content, date_spot_id=spot.id
+    )
+    return {
+        "conversation_id": conversation_id,
+        "message": MessageDisplay.model_validate(message),
+    }
+
+
 @router.post("", response_model=DateSpotDisplay)
 async def create_date_spot(
     name: str = Form(...),
     city: str = Form(...),
     country: str = Form(...),
     description: str = Form(...),
+    neighborhood: Optional[str] = Form(None),
     map_url: Optional[str] = Form(None),
     category: Optional[str] = Form(None),
+    price: Optional[str] = Form(None),
+    best_for: Optional[str] = Form(None),
     image: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
     current_user: UserAuth = Depends(get_current_user),
 ):
-    name = (name or "").strip()
-    city = (city or "").strip()
-    country = (country or "").strip()
+    name = _tidy(name, 150)
     description = (description or "").strip()
 
     if not name:
         raise HTTPException(status_code=400, detail="Please give the place a name.")
-    if not city or not country:
+    if not _tidy(city, 120) or not _tidy(country, 120):
         raise HTTPException(status_code=400, detail="Please say which city and country it's in.")
     if len(description) < 10:
         raise HTTPException(
@@ -223,11 +431,11 @@ async def create_date_spot(
             detail="Please add a short description (at least 10 characters).",
         )
 
+    city, country = _canonical_place(db, city, country)
     map_link = _clean_map_url(map_url)
-
-    spot_category = (category or "").strip() or None
-    if spot_category and spot_category not in CATEGORIES:
-        raise HTTPException(status_code=400, detail="Please pick a valid category.")
+    spot_category = _clean_category(category)
+    spot_price = _clean_price(price)
+    spot_best_for = _clean_best_for(best_for)
 
     profile = db.query(DbProfile).filter(DbProfile.user_id == current_user.id).first()
     if not profile:
@@ -239,27 +447,109 @@ async def create_date_spot(
     image_url = None
     public_id = None
     if image is not None:
-        try:
-            result = cloudinary.uploader.upload(image.file)
-            image_url = result["secure_url"]
-            public_id = result["public_id"]
-        except Exception:
-            raise HTTPException(status_code=400, detail="We couldn't upload that photo. Please try another one.")
+        image_url, public_id = _upload_image(image)
 
     spot = DbDateSpot(
         name=name,
         city=city,
         country=country,
+        neighborhood=_clean_neighborhood(neighborhood, city),
         description=description,
         image_url=image_url,
         public_id=public_id,
         map_url=map_link,
         category=spot_category,
+        price=spot_price,
+        best_for=spot_best_for,
         profile_id=profile.id,
     )
     db.add(spot)
     db.commit()
     db.refresh(spot)
+    return spot
+
+
+@router.patch("/{spot_id}", response_model=DateSpotDisplay)
+def update_date_spot(
+    spot_id: int,
+    payload: DateSpotUpdate,
+    db: Session = Depends(get_db),
+    current_user: UserAuth = Depends(get_current_user),
+):
+    """Edit a spot's details. Only fields present in the body change; optional
+    fields sent as "" or null are cleared.
+
+    JSON rather than a form on purpose: FastAPI reads an empty form field as
+    "not sent", which would make it impossible to clear a field. The photo is
+    replaced separately via PUT /{spot_id}/image.
+    """
+    spot = _get_spot(db, spot_id)
+    if not _can_manage(db, spot, current_user):
+        raise HTTPException(status_code=403, detail="You can only edit places you added.")
+
+    sent = payload.model_fields_set
+
+    if "name" in sent:
+        name = _tidy(payload.name, 150)
+        if not name:
+            raise HTTPException(status_code=400, detail="Please give the place a name.")
+        spot.name = name
+
+    if "description" in sent:
+        description = (payload.description or "").strip()
+        if len(description) < 10:
+            raise HTTPException(
+                status_code=400,
+                detail="Please add a short description (at least 10 characters).",
+            )
+        spot.description = description
+
+    if "city" in sent or "country" in sent:
+        city = payload.city if "city" in sent else spot.city
+        country = payload.country if "country" in sent else spot.country
+        if not _tidy(city, 120) or not _tidy(country, 120):
+            raise HTTPException(status_code=400, detail="Please say which city and country it's in.")
+        spot.city, spot.country = _canonical_place(db, city, country)
+
+    if "neighborhood" in sent:
+        spot.neighborhood = _clean_neighborhood(payload.neighborhood, spot.city)
+    if "map_url" in sent:
+        spot.map_url = _clean_map_url(payload.map_url)
+    if "category" in sent:
+        spot.category = _clean_category(payload.category)
+    if "price" in sent:
+        spot.price = _clean_price(payload.price)
+    if "best_for" in sent:
+        spot.best_for = _clean_best_for(payload.best_for)
+
+    db.commit()
+    db.refresh(spot)
+    return spot
+
+
+@router.put("/{spot_id}/image", response_model=DateSpotDisplay)
+async def replace_date_spot_image(
+    spot_id: int,
+    image: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: UserAuth = Depends(get_current_user),
+):
+    """Add or replace a spot's photo (e.g. an admin illustrating a starter spot)."""
+    spot = _get_spot(db, spot_id)
+    if not _can_manage(db, spot, current_user):
+        raise HTTPException(status_code=403, detail="You can only edit places you added.")
+
+    old_public_id = spot.public_id
+    spot.image_url, spot.public_id = _upload_image(image)
+    db.commit()
+    db.refresh(spot)
+
+    if old_public_id:
+        try:
+            cloudinary.uploader.destroy(old_public_id)
+        except Exception:
+            # The new photo is already saved; a leftover old file is harmless.
+            pass
     return spot
 
 
@@ -270,14 +560,8 @@ def delete_date_spot(
     current_user: UserAuth = Depends(get_current_user),
 ):
     """Authors can remove their own spot; admins can remove any (moderation)."""
-    spot = db.query(DbDateSpot).filter(DbDateSpot.id == spot_id).first()
-    if not spot:
-        raise HTTPException(status_code=404, detail="That place no longer exists.")
-
-    profile = db.query(DbProfile).filter(DbProfile.user_id == current_user.id).first()
-    is_owner = profile is not None and spot.profile_id == profile.id
-    is_admin = bool(getattr(current_user, "is_admin", False))
-    if not is_owner and not is_admin:
+    spot = _get_spot(db, spot_id)
+    if not _can_manage(db, spot, current_user):
         raise HTTPException(status_code=403, detail="You can only remove places you added.")
 
     if spot.public_id:

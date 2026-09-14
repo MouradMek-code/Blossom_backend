@@ -341,11 +341,29 @@ class MatchDisplay(BaseModel):
 class MessageCreate(BaseModel):
     content: str
 
+class DateSpotSummary(BaseModel):
+    """The slice of a date spot a chat invite card needs."""
+    id: int
+    name: str
+    city: str
+    country: str
+    neighborhood: Optional[str] = None
+    image_url: Optional[str] = None
+    category: Optional[str] = None
+    price: Optional[str] = None
+
+    class Config:
+        orm_mode = True
+
 class MessageDisplay(BaseModel):
     id: int
     sender_profile_id: int
     content: str
     created_at: datetime
+    # Present on "let's go here" invites; None for ordinary messages, or if
+    # the spot has since been deleted.
+    date_spot_id: Optional[int] = None
+    date_spot: Optional[DateSpotSummary] = None
 
     class Config:
         orm_mode = True
@@ -379,16 +397,44 @@ class ResetPasswordRequest(BaseModel):
 
 
 class DateSpotAuthor(BaseModel):
+    # id lets clients tell whether the viewer wrote the spot (to offer Edit).
+    id: Optional[int] = None
     first_name: Optional[str] = None
 
     class Config:
         orm_mode = True
 
 
+class DateSpotInvite(BaseModel):
+    """Send a spot to a match as a chat message."""
+    profile_id: int
+    # Written in the sender's app language; the server falls back to English.
+    content: Optional[str] = Field(default=None, max_length=500)
+
+
+class DateSpotInviteResult(BaseModel):
+    conversation_id: int
+    message: MessageDisplay
+
+
 class DateSpotStatsUpdate(BaseModel):
     """Admin-set counters, e.g. to seed a venue's numbers."""
     view_count: Optional[int] = Field(default=None, ge=0)
     map_click_count: Optional[int] = Field(default=None, ge=0)
+
+
+class DateSpotUpdate(BaseModel):
+    """Partial edit: only the fields actually sent are applied (see
+    model_fields_set in the router), so omitting a field leaves it alone."""
+    name: Optional[str] = None
+    city: Optional[str] = None
+    country: Optional[str] = None
+    neighborhood: Optional[str] = None
+    description: Optional[str] = None
+    map_url: Optional[str] = None
+    category: Optional[str] = None
+    price: Optional[str] = None
+    best_for: Optional[List[str]] = None
 
 
 class DateSpotDisplay(BaseModel):
@@ -400,10 +446,23 @@ class DateSpotDisplay(BaseModel):
     image_url: Optional[str] = None
     map_url: Optional[str] = None
     category: Optional[str] = None
+    neighborhood: Optional[str] = None
+    price: Optional[str] = None
+    best_for: List[str] = []
     view_count: int = 0
     map_click_count: int = 0
     created_at: Optional[datetime] = None
     profile: Optional[DateSpotAuthor] = None
+
+    # Stored as "First date,Casual"; clients get a proper list.
+    @field_validator("best_for", mode="before")
+    @classmethod
+    def split_best_for(cls, value):
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [part.strip() for part in value.split(",") if part.strip()]
+        return value
 
     class Config:
         orm_mode = True

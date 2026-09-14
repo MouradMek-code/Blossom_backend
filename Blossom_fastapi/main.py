@@ -75,6 +75,30 @@ with engine.begin() as connection:
     connection.execute(text(
         "ALTER TABLE date_spots ADD COLUMN IF NOT EXISTS map_click_count INTEGER NOT NULL DEFAULT 0"
     ))
+    connection.execute(text(
+        "ALTER TABLE date_spots ADD COLUMN IF NOT EXISTS neighborhood VARCHAR(120)"
+    ))
+    connection.execute(text(
+        "ALTER TABLE date_spots ADD COLUMN IF NOT EXISTS price VARCHAR(8)"
+    ))
+    connection.execute(text(
+        "ALTER TABLE date_spots ADD COLUMN IF NOT EXISTS best_for VARCHAR(120)"
+    ))
+    connection.execute(text(
+        "ALTER TABLE message ADD COLUMN IF NOT EXISTS date_spot_id INTEGER "
+        "REFERENCES date_spots(id) ON DELETE SET NULL"
+    ))
+    # One-off data fix: before the neighborhood field existed, these Paris
+    # neighborhoods were entered as cities, splitting Paris into three "cities"
+    # in the filters. Idempotent - once moved, the WHERE matches nothing.
+    connection.execute(text(
+        "UPDATE date_spots SET city = 'Paris', neighborhood = 'Châtelet' "
+        "WHERE city = 'Chatelet' AND country = 'France'"
+    ))
+    connection.execute(text(
+        "UPDATE date_spots SET city = 'Paris', neighborhood = 'Cité Universitaire' "
+        "WHERE city = 'Cite universitaire' AND country = 'France'"
+    ))
 
 app.add_middleware(
     CORSMiddleware,
