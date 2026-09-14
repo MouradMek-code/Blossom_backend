@@ -290,6 +290,16 @@ class DbMessage(Base):
     )
     date_spot = relationship("DbDateSpot")
 
+    # Whether the recipient has opened the conversation since this arrived.
+    # Chats are 1:1, so "recipient" is simply the participant who didn't send
+    # it. Drives the unread badges on Messages.
+    is_read = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false"
+    )
+
     created_at = Column(
         DateTime,
         default=datetime.utcnow

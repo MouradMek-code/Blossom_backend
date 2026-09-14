@@ -88,6 +88,15 @@ with engine.begin() as connection:
         "ALTER TABLE message ADD COLUMN IF NOT EXISTS date_spot_id INTEGER "
         "REFERENCES date_spots(id) ON DELETE SET NULL"
     ))
+    # Existing messages are backfilled as already read (DEFAULT true), so the
+    # new unread badges don't light up for old history; new messages then
+    # default to unread.
+    connection.execute(text(
+        "ALTER TABLE message ADD COLUMN IF NOT EXISTS is_read BOOLEAN NOT NULL DEFAULT true"
+    ))
+    connection.execute(text(
+        "ALTER TABLE message ALTER COLUMN is_read SET DEFAULT false"
+    ))
     # One-off data fix: before the neighborhood field existed, these Paris
     # neighborhoods were entered as cities, splitting Paris into three "cities"
     # in the filters. Idempotent - once moved, the WHERE matches nothing.

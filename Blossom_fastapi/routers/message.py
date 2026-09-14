@@ -13,6 +13,41 @@ router = APIRouter(
     tags=["Messages"]
 )
 
+
+def _my_profile_id(db: Session, user: UserAuth) -> int:
+    profile = db.query(DbProfile).filter(DbProfile.user_id == user.id).first()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Finish creating your profile first.")
+    return profile.id
+
+
+@router.get("/inbox")
+def inbox(
+    db: Session = Depends(get_db),
+    user: UserAuth = Depends(get_current_user)
+):
+    """The Messages page: every match with its last message and unread count."""
+    return db_message.get_inbox(db, _my_profile_id(db, user))
+
+
+@router.get("/unread_count")
+def unread_count(
+    db: Session = Depends(get_db),
+    user: UserAuth = Depends(get_current_user)
+):
+    """Conversations with unread messages - the badge on the Messages link."""
+    return {"count": db_message.count_unread_conversations(db, _my_profile_id(db, user))}
+
+
+@router.get("/conversation/{conversation_id}/details")
+def conversation_details(
+    conversation_id: int,
+    db: Session = Depends(get_db),
+    user: UserAuth = Depends(get_current_user)
+):
+    """Name and photo of the person on the other side, for the chat header."""
+    return db_message.get_conversation_details(db, conversation_id, _my_profile_id(db, user))
+
 @router.get(
     "/conversations",
     response_model=list[ConversationDisplay]
