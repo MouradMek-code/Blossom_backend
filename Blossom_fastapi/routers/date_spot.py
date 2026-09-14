@@ -399,7 +399,9 @@ def invite_to_date_spot(
     )
     return {
         "conversation_id": conversation_id,
-        "message": MessageDisplay.model_validate(message),
+        # from_attributes must be explicit: Pydantic 2 ignores the legacy
+        # orm_mode config when validating by hand.
+        "message": MessageDisplay.model_validate(message, from_attributes=True),
     }
 
 
