@@ -66,6 +66,9 @@ with engine.begin() as connection:
         "ALTER TABLE \"user\" ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false"
     ))
     connection.execute(text(
+        "ALTER TABLE \"user\" ADD COLUMN IF NOT EXISTS sessions_valid_after TIMESTAMP"
+    ))
+    connection.execute(text(
         "ALTER TABLE date_spots ADD COLUMN IF NOT EXISTS map_url VARCHAR(500)"
     ))
     connection.execute(text(

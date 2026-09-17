@@ -46,4 +46,12 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     user = db_user.get_user_by_username(db, username=username)
     if user is None:
         raise credentials_exception
+
+    # Long sessions must still end when the password is reset (e.g. someone
+    # else got into the account): reject tokens issued before that moment.
+    valid_after = getattr(user, "sessions_valid_after", None)
+    if valid_after is not None:
+        issued_at = payload.get("iat")
+        if issued_at is None or datetime.utcfromtimestamp(issued_at) < valid_after:
+            raise credentials_exception
     return user

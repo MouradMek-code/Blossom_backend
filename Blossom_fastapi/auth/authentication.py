@@ -33,3 +33,13 @@ async def login(request : OAuth2PasswordRequestForm = Depends(),db: Session = De
 
     return {"access_token":access_token,"token_type":"bearer","user_id":user.id,"username":user.username}
 
+
+@router.post('/refresh_token')
+def refresh_token(current_user: DbUser = Depends(oauth2.get_current_user)):
+    """Swap a still-valid session for a fresh one-year session. The app calls
+    this when it's opened, so anyone who uses it stays logged in until they
+    log out. An invalid session (expired, or cut off by a password reset)
+    gets 401 like any other request."""
+    access_token = oauth2.create_access_token(data={"username": current_user.username})
+    return {"access_token": access_token, "token_type": "bearer", "user_id": current_user.id, "username": current_user.username}
+

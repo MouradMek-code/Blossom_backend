@@ -507,6 +507,9 @@ async def reset_password(request: ResetPasswordRequest, db: Session = Depends(ge
         raise HTTPException(404, "User not found")
 
     user.password = HashedPassword.HashedPassword.hash_password(request.new_password)
+    # Log out every existing session (other phones, a thief's copy); the user
+    # logs back in with the new password.
+    user.sessions_valid_after = datetime.utcnow().replace(microsecond=0)
     db.commit()
 
     db.query(OTP).filter(OTP.email == request.email).delete()
