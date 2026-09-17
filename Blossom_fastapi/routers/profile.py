@@ -73,6 +73,11 @@ async def upload_image(image:UploadFile=File(...),db:Session = Depends(get_db),c
 
 @router.put("/update_city_country", response_model=ProfileDisplay)
 def update_location(city:str,country:str,db:Session = Depends(get_db),current_user: UserAuth=Depends(get_current_user)):
+    city = " ".join(city.split())
+    country = " ".join(country.split())
+    # Both columns are VARCHAR(50); reject cleanly instead of a database error.
+    if not city or not country or len(city) > 50 or len(country) > 50:
+        raise HTTPException(status_code=400, detail="Please choose a country and a city.")
     result=db_profile.update_profile(db,current_user,city,country)
     if result is None:
         raise HTTPException(status_code=404,detail="Profiles still doesn't exist")
