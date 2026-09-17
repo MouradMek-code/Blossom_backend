@@ -412,6 +412,17 @@ class DateSpotInvite(BaseModel):
     content: Optional[str] = Field(default=None, max_length=500)
 
 
+class PushTokenRegister(BaseModel):
+    """A phone's Expo push token, sent by the app after login."""
+    token: str = Field(min_length=10, max_length=255)
+    # App language, so notifications arrive in it.
+    language: Optional[str] = Field(default=None, max_length=8)
+
+
+class PushTokenUnregister(BaseModel):
+    token: str = Field(min_length=10, max_length=255)
+
+
 class DateSpotInviteResult(BaseModel):
     conversation_id: int
     message: MessageDisplay

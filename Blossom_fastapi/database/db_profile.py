@@ -291,6 +291,10 @@ def delete_account(db: Session, user: UserAuth):
 
         db.delete(profile)
 
+    # Stop notifying this account's phones.
+    from database import db_push
+    db_push.delete_user_tokens(db, user.id)
+
     db_user = db.query(DbUser).filter(DbUser.id == user.id).first()
     db.delete(db_user)
     db.commit()

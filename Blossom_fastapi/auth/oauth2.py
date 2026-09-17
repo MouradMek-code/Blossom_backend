@@ -13,16 +13,19 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 load_dotenv()
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = 'HS256'
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+
+# People stay logged in until they log out: a session lasts a year, and the
+# app swaps it for a fresh one (POST /refresh_token) whenever it's opened. It
+# used to be 15 minutes, which logged everyone out constantly.
+ACCESS_TOKEN_EXPIRE_DAYS = 365
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.utcnow() + expires_delta
-    else:
-        expire = datetime.utcnow() + timedelta(minutes=15)
-    to_encode.update({"exp": expire})
+    now = datetime.utcnow()
+    expire = now + (expires_delta or timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS))
+    # "iat" (issued at) lets a password reset cut off sessions issued before it.
+    to_encode.update({"exp": expire, "iat": now})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 

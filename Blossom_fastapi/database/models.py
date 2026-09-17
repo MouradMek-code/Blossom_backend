@@ -435,3 +435,33 @@ class DbDateSpot(Base):
         DateTime,
         default=datetime.utcnow
     )
+
+
+class DbPushToken(Base):
+    """An Expo push token for one phone, so the backend can notify it (new
+    message, match, like) while the app is closed."""
+
+    __tablename__ = "push_token"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    user_id = Column(
+        Integer,
+        ForeignKey("user.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+
+    # One row per phone. If someone else logs in on the same phone, the token
+    # moves to their account.
+    token = Column(String(255), nullable=False, unique=True)
+
+    # App language on that phone ("en", "fr", "zh", "ar"), so notification
+    # texts can be sent in it.
+    language = Column(String(8), nullable=True)
+
+    updated_at = Column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow
+    )

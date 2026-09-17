@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 from database.models import  DbProfile,DbProfilePhoto
 from auth.oauth2 import get_current_user
-from database import db_post,db_message
+from database import db_post,db_message,db_push
 from database.database import get_db
 from routers.schemas import PostDisplay, PostBase, MessageCreate,ProfilePhotoBase, UserAuth,ProfilePhotoDisplay,ConversationDisplay,MessageDisplay
 import cloudinary.uploader
@@ -85,13 +85,17 @@ def messages(
 def send(
     conversation_id: int,
     request: MessageCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     user: UserAuth = Depends(get_current_user)
 ):
     db_profile_instance = db.query(DbProfile).filter(DbProfile.user_id == user.id).first()
-    return db_message.send_message(
+    message = db_message.send_message(
         db,
         conversation_id,
         db_profile_instance.id,
         request.content
     )
+    # Only reached if the message was accepted (access, blocks, who writes first).
+    db_push.notify_new_message(db, background_tasks, conversation_id, db_profile_instance.id)
+    return message

@@ -1,13 +1,13 @@
 from typing import List
 
 from fastapi import APIRouter
-from fastapi import Depends
+from fastapi import BackgroundTasks, Depends
 
 from sqlalchemy.orm import Session, selectinload
 
 from auth.oauth2 import get_current_user
 from database.database import get_db
-from database import db_like
+from database import db_like, db_push
 from routers.schemas import UserAuth, ProfileDisplay
 from database.models import DbProfileLike,DbProfile,DbMatch
 
@@ -19,14 +19,21 @@ router = APIRouter(
 @router.post("/{liked_profile_id}")
 def like_profile(
     liked_profile_id: int,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: UserAuth=Depends(get_current_user)
 ):
-    return db_like.like_profile(
+    result = db_like.like_profile(
         db,
         current_user.id,
         liked_profile_id
     )
+    # "already liked" returns no "liked" key - nothing new to announce.
+    if result.get("liked"):
+        liker = db.query(DbProfile).filter(DbProfile.user_id == current_user.id).first()
+        if liker:
+            db_push.notify_like(db, background_tasks, liker.id, liked_profile_id, bool(result.get("matched")))
+    return result
 
 @router.get("/profile_likes/unseen_count")
 def unseen_likes_count(

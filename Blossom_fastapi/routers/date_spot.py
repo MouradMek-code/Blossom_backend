@@ -5,11 +5,11 @@ from urllib.parse import quote_plus, urlparse
 
 import cloudinary
 import cloudinary.uploader
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session, selectinload
 
 from auth.oauth2 import get_current_user
-from database import db_message, db_profile
+from database import db_message, db_profile, db_push
 from database.database import get_db
 from database.models import DbDateSpot, DbMatch, DbProfile, DbUser
 from database.starter_spots import STARTER_CITY, STARTER_COUNTRY, STARTER_SPOTS
@@ -366,6 +366,7 @@ def set_date_spot_stats(
 def invite_to_date_spot(
     spot_id: int,
     payload: DateSpotInvite,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: UserAuth = Depends(get_current_user),
 ):
@@ -397,6 +398,7 @@ def invite_to_date_spot(
     message = db_message.send_message(
         db, conversation_id, profile.id, content, date_spot_id=spot.id
     )
+    db_push.notify_new_message(db, background_tasks, conversation_id, profile.id)
     return {
         "conversation_id": conversation_id,
         # from_attributes must be explicit: Pydantic 2 ignores the legacy
