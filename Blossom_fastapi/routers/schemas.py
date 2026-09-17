@@ -137,6 +137,15 @@ class ProfilePhotoDisplay(BaseModel):
         orm_mode = True
 
 
+class ProfilePhotoLean(BaseModel):
+    """A photo inside a profile: just what the apps show."""
+    id: int
+    image_url: str
+
+    class Config:
+        orm_mode = True
+
+
 class ProfileBase(BaseModel):
     bio: Optional[str] = None
 
@@ -250,10 +259,14 @@ class ProfileDisplay(BaseModel):
 
 
 
-    photos: List[ProfilePhotoDisplay]
+    # Just id + url. ProfilePhotoDisplay repeats the whole profile (bio
+    # included) inside every photo, tripling the payload for nothing.
+    photos: List[ProfilePhotoLean]
 
     created_at: datetime
-    user: User
+    # No `user` here: it put every member's username and email into Browse /
+    # Matches / Likes You responses (a privacy leak), and loading it cost one
+    # extra database query per profile. No client uses it.
     class Config:
         orm_mode = True
 

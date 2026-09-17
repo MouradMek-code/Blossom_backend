@@ -27,28 +27,28 @@ router = APIRouter(
 )
 
 @router.post("/", response_model=ProfileDisplay)
-async def create_profile(request:ProfileBase,db:Session=Depends(get_db),current_use: UserAuth=Depends(get_current_user)):
+def create_profile(request:ProfileBase,db:Session=Depends(get_db),current_use: UserAuth=Depends(get_current_user)):
     return db_profile.create_profile(db,request,current_use)
 
 @router.get("/", response_model=ProfileDisplay)
-async def read_profile(current_user:UserAuth=Depends(get_current_user),db:Session=Depends(get_db)):
+def read_profile(current_user:UserAuth=Depends(get_current_user),db:Session=Depends(get_db)):
     result=db_profile.get_profile(db,current_user)
 
     if result is None:
         raise HTTPException(status_code=404,detail="Profile still doesn't exist")
     return result
 @router.get("/profiles/matched", response_model=List[ProfileDisplay])
-async def read_profile_matched(current_user:UserAuth=Depends(get_current_user),db:Session=Depends(get_db)):
+def read_profile_matched(current_user:UserAuth=Depends(get_current_user),db:Session=Depends(get_db)):
     result=db_profile.get_profiles_matched(db,current_user)
     return result
 @router.get("/all_profile", response_model=List[ProfileDisplay])
-async def get_all_profiles(current_user:UserAuth=Depends(get_current_user),db:Session=Depends(get_db)):
+def get_all_profiles(current_user:UserAuth=Depends(get_current_user),db:Session=Depends(get_db)):
     result=db_profile.get_all_profiles(db,current_user)
     if result is None:
         raise HTTPException(status_code=404,detail="Profiles still doesn't exist")
     return result
 @router.get("/{id}", response_model=ProfileDisplay)
-async def read_profile(id:int,current_user:UserAuth=Depends(get_current_user),db:Session=Depends(get_db)):
+def read_profile(id:int,current_user:UserAuth=Depends(get_current_user),db:Session=Depends(get_db)):
     result=db_profile.get_profile_by_id(db,id)
 
     if result is None:
@@ -58,7 +58,7 @@ async def read_profile(id:int,current_user:UserAuth=Depends(get_current_user),db
 
 
 @router.post("/image",response_model=ProfilePhotoDisplay)
-async def upload_image(image:UploadFile=File(...),db:Session = Depends(get_db),current_use: UserAuth=Depends(get_current_user)):
+def upload_image(image:UploadFile=File(...),db:Session = Depends(get_db),current_use: UserAuth=Depends(get_current_user)):
     result = cloudinary.uploader.upload(image.file)
     db_profile_instance = db.query(DbProfile).filter(DbProfile.user_id == current_use.id).first()
     db_profile_photo = DbProfilePhoto(

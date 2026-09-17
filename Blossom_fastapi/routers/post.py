@@ -20,22 +20,22 @@ router = APIRouter(
 image_type=["absolute","relative"]
 
 @router.post('', response_model=PostDisplay)
-async def create_post(request:PostBase,db:Session = Depends(get_db),current_use: UserAuth=Depends(get_current_user)):
+def create_post(request:PostBase,db:Session = Depends(get_db),current_use: UserAuth=Depends(get_current_user)):
     if request.image_type  not in image_type:
            raise HTTPException(status_code=400,detail="Image type not supported")
 
     return  db_post.create_post(db,request,current_use.id)
 
 @router.get('/all', response_model=list[PostDisplay])
-async def get_posts_all(db:Session = Depends(get_db)):
+def get_posts_all(db:Session = Depends(get_db)):
     return db_post.get_all_posts(db)
 
 
 @router.get('/{user_id}', response_model=PostDisplay)
-async def get_post_by_user_id(user_id :int,db:Session = Depends(get_db)):
+def get_post_by_user_id(user_id :int,db:Session = Depends(get_db)):
     return db_post.get_post_by_user_id(db,user_id)
 
 @router.delete('delete/{post_id}')
-async def delete_post(post_id:int,db:Session = Depends(get_db),current_use: UserAuth=Depends(get_current_user)):
+def delete_post(post_id:int,db:Session = Depends(get_db),current_use: UserAuth=Depends(get_current_user)):
     return db_post.delete_post_by_id(db,post_id,current_use.id)
 

@@ -8,7 +8,7 @@ from methods.HashedPassword import HashedPassword
 router=APIRouter(tags=["authentication"])
 
 @router.post('/login')
-async def login(request : OAuth2PasswordRequestForm = Depends(),db: Session = Depends(get_db)):
+def login(request : OAuth2PasswordRequestForm = Depends(),db: Session = Depends(get_db)):
     # OAuth2PasswordRequestForm always names this field "username" per spec,
     # but the value itself can be either a username or an email - look up
     # by whichever one matches.

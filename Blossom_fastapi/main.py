@@ -114,6 +114,43 @@ with engine.begin() as connection:
         "WHERE city = 'Cite universitaire' AND country = 'France'"
     ))
 
+# Indexes for the lookups every screen makes (user by username, a profile's
+# photos, likes/matches/blocks of a profile, a conversation's messages).
+# Without them each of those scans the whole table, which gets slower with
+# every new member. Same names create_all gives the index=True columns in
+# models.py, so a fresh database doesn't end up with duplicates.
+# One query finds the ones already there, so normal restarts cost a single
+# round trip. Missing ones get a transaction each: if two workers start at
+# once and race on the same index, only that statement fails and startup
+# carries on.
+HOT_PATH_INDEXES = [
+    ("user", "username"),
+    ("user", "email"),
+    ("profile_photos", "profile_id"),
+    ("language", "profile_id"),
+    ("learning_language", "profile_id"),
+    ("profile_like", "liked_profile_id"),
+    ("match", "profile1_id"),
+    ("match", "profile2_id"),
+    ("message", "conversation_id"),
+    ("profile_block", "blocked_profile_id"),
+]
+with engine.connect() as connection:
+    existing_indexes = set(connection.execute(text(
+        "SELECT indexname FROM pg_indexes WHERE schemaname = current_schema()"
+    )).scalars())
+for table, column in HOT_PATH_INDEXES:
+    index_name = f"ix_{table}_{column}"
+    if index_name in existing_indexes:
+        continue
+    try:
+        with engine.begin() as connection:
+            connection.execute(text(
+                f'CREATE INDEX IF NOT EXISTS {index_name} ON "{table}" ({column})'
+            ))
+    except Exception as exc:
+        print(f"Index {index_name} not created this time: {exc}")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

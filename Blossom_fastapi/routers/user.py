@@ -8,9 +8,10 @@ import json
 from vonage import Auth, Vonage
 from vonage_messages import Sms
 from routers.schemas import VerifyOTPRequest, ForgotPasswordRequest, ResetPasswordRequest
-from database.models import DbUser, DbProfile
+from database.models import DbUser, DbProfile, DbMatch, DbProfileLike
 from datetime import datetime, timedelta
-from database import db_user, db_profile
+from sqlalchemy import func
+from database import db_user, db_profile, db_message
 from database.database import get_db
 from routers.schemas import UserDisplay, UserBase, UserAuth
 from database.models import OTP
@@ -31,7 +32,7 @@ router = APIRouter(
 )
 import re
 @router.post('', response_model=UserDisplay)
-async def create_user(request:UserBase,db:Session = Depends(get_db)):
+def create_user(request:UserBase,db:Session = Depends(get_db)):
 
     return db_user.create_user(db,request)
 @router.post("/verify")
@@ -92,6 +93,48 @@ def get_me(db: Session = Depends(get_db), current_user: UserAuth = Depends(get_c
         "profile_id": profile.id if profile else None,
     }
 
+# Also above GET /{id}, for the same reason as /me.
+@router.get('/badges')
+def get_badges(db: Session = Depends(get_db), current_user: UserAuth = Depends(get_current_user)):
+    """Everything the menu needs, in one request: whether the profile exists,
+    admin or not, and the Matches / Likes You / Messages badge counts.
+
+    The apps used to fire four requests (/profile plus three count endpoints,
+    ~16 database queries) on every screen just to draw the menu; this is one
+    request and ~6 queries. The old endpoints stay for older app versions.
+    """
+    is_admin = bool(getattr(current_user, "is_admin", False))
+    profile_id = db.query(DbProfile.id).filter(DbProfile.user_id == current_user.id).scalar()
+    if profile_id is None:
+        return {"has_profile": False, "is_admin": is_admin, "matches": 0, "likes": 0, "messages": 0}
+
+    # One query gives both the unseen-match count and the matched ids that
+    # the likes badge excludes (same rules as /matches/unseen_count and
+    # /likes/profile_likes/unseen_count).
+    matches = db.query(
+        DbMatch.profile1_id, DbMatch.profile2_id, DbMatch.seen_by_profile1, DbMatch.seen_by_profile2
+    ).filter((DbMatch.profile1_id == profile_id) | (DbMatch.profile2_id == profile_id)).all()
+    unseen_matches = sum(
+        1 for p1, p2, seen1, seen2 in matches
+        if (p1 == profile_id and not seen1) or (p2 == profile_id and not seen2)
+    )
+    matched_ids = [p2 if p1 == profile_id else p1 for p1, p2, _, _ in matches]
+
+    likes_query = db.query(func.count(DbProfileLike.id)).filter(
+        DbProfileLike.liked_profile_id == profile_id,
+        DbProfileLike.seen == False,  # noqa: E712
+    )
+    if matched_ids:
+        likes_query = likes_query.filter(DbProfileLike.liker_profile_id.notin_(matched_ids))
+
+    return {
+        "has_profile": True,
+        "is_admin": is_admin,
+        "matches": unseen_matches,
+        "likes": likes_query.scalar() or 0,
+        "messages": db_message.count_unread_conversations(db, profile_id),
+    }
+
 @router.get('/{id}', response_model=UserDisplay)
 def get_user_by_id(id:int,db:Session = Depends(get_db)):
     return db_user.get_user_by_id(db,id)
@@ -110,7 +153,7 @@ def delete_user_by_id(id:int,db:Session = Depends(get_db)):
 
 
 @router.post("/verify-phone")
-async def verify_otp(request:VerifyOTPRequest,db:Session = Depends(get_db)):
+def verify_otp(request:VerifyOTPRequest,db:Session = Depends(get_db)):
 
     record = db.query(OTP).filter(
         OTP.phone_number == request.phone_number
@@ -490,7 +533,7 @@ async def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(
     return {"message": "If that email exists, a reset code has been sent."}
 
 @router.post("/reset_password")
-async def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db)):
+def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db)):
     record = db.query(OTP).filter(
         OTP.email == request.email
     ).order_by(OTP.id.desc()).first()
@@ -577,7 +620,7 @@ async def resend_email_verification(email: str, phone_number: str, db: Session =
     raise HTTPException(status_code=400, detail=result)
 
 @router.post("/verify-email")
-async def verify_otp_email(request:VerifyOTPRequest,db:Session = Depends(get_db)):
+def verify_otp_email(request:VerifyOTPRequest,db:Session = Depends(get_db)):
 
     record = db.query(OTP).filter(
         OTP.email == request.email

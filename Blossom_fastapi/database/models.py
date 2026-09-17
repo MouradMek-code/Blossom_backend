@@ -7,8 +7,9 @@ from datetime import datetime
 class DbUser(Base):
     __tablename__ = "user"
     id = Column(Integer, primary_key=True,index=True)
-    username = Column(String)
-    email = Column(String)
+    # Indexed: every logged-in request looks the user up by username.
+    username = Column(String, index=True)
+    email = Column(String, index=True)
     password = Column(String)
     phone_number = Column(String)
     date_of_birth = Column(Date)
@@ -46,7 +47,7 @@ class DbLanguage(Base):
     __tablename__ = "language"
     id = Column(Integer, primary_key=True,index=True)
     language_name = Column(String)
-    profile_id = Column(Integer, ForeignKey("profiles.id"))
+    profile_id = Column(Integer, ForeignKey("profiles.id"), index=True)
     profile = relationship("DbProfile",back_populates="languages")
 
 
@@ -54,7 +55,7 @@ class DbLearningLanguage(Base):
     __tablename__ = "learning_language"
     id = Column(Integer, primary_key=True, index=True)
     language_name = Column(String)
-    profile_id = Column(Integer, ForeignKey("profiles.id"))
+    profile_id = Column(Integer, ForeignKey("profiles.id"), index=True)
     profile = relationship("DbProfile", back_populates="learning_languages")
 
 
@@ -134,7 +135,8 @@ class DbProfilePhoto(Base):
         profile_id = Column(
             Integer,
             ForeignKey("profiles.id", ondelete="CASCADE"),
-            nullable=False
+            nullable=False,
+            index=True
         )
         profile = relationship(
             "DbProfile",
@@ -155,10 +157,12 @@ class DbProfileLike(Base):
         nullable=False
     )
 
+    # liker_profile_id is covered by uq_profile_like (it's the leading column).
     liked_profile_id = Column(
         Integer,
         ForeignKey("profiles.id"),
-        nullable=False
+        nullable=False,
+        index=True
     )
 
     created_at = Column(
@@ -199,13 +203,15 @@ class DbMatch(Base):
         profile1_id = Column(
             Integer,
             ForeignKey("profiles.id"),
-            nullable=False
+            nullable=False,
+            index=True
         )
 
         profile2_id = Column(
             Integer,
             ForeignKey("profiles.id"),
-            nullable=False
+            nullable=False,
+            index=True
         )
 
         matched_at = Column(
@@ -269,7 +275,8 @@ class DbMessage(Base):
     conversation_id = Column(
         Integer,
         ForeignKey("conversation.id"),
-        nullable=False
+        nullable=False,
+        index=True
     )
 
     sender_profile_id = Column(
@@ -340,10 +347,12 @@ class DbBlock(Base):
         nullable=False
     )
 
+    # blocker_profile_id is covered by uq_profile_block (the leading column).
     blocked_profile_id = Column(
         Integer,
         ForeignKey("profiles.id"),
-        nullable=False
+        nullable=False,
+        index=True
     )
 
     created_at = Column(

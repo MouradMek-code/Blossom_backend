@@ -408,7 +408,7 @@ def invite_to_date_spot(
 
 
 @router.post("", response_model=DateSpotDisplay)
-async def create_date_spot(
+def create_date_spot(
     name: str = Form(...),
     city: str = Form(...),
     country: str = Form(...),
@@ -532,7 +532,7 @@ def update_date_spot(
 
 
 @router.put("/{spot_id}/image", response_model=DateSpotDisplay)
-async def replace_date_spot_image(
+def replace_date_spot_image(
     spot_id: int,
     image: UploadFile = File(...),
     db: Session = Depends(get_db),

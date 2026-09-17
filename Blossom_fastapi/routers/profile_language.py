@@ -12,5 +12,5 @@ router = APIRouter(
 )
 
 @router.post("/", response_model=ProfileLanguageDisplay)
-async def create_profile(request:ProfileBaseLanguage,db:Session=Depends(get_db),current_use: UserAuth=Depends(get_current_user)):
+def create_profile(request:ProfileBaseLanguage,db:Session=Depends(get_db),current_use: UserAuth=Depends(get_current_user)):
     return db_languages.create_languages(db,request,current_use)
