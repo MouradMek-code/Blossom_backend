@@ -1,10 +1,12 @@
 import os
+import re
 import unicodedata
 from typing import List, Optional, Union
-from urllib.parse import quote_plus, urlparse
+from urllib.parse import parse_qs, quote_plus, unquote_plus, urljoin, urlparse
 
 import cloudinary
 import cloudinary.uploader
+import requests
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session, selectinload
 
@@ -93,6 +95,69 @@ def _clean_map_url(raw: Optional[str]) -> Optional[str]:
 
 def _maps_search_url(query: str) -> str:
     return "https://www.google.com/maps/search/?api=1&query=" + quote_plus(query)
+
+
+# Hosts of Google's short share links (what "Share > Copy link" gives in the
+# Google Maps app). Only these are ever fetched, and only for their redirect.
+_SHORT_LINK_HOSTS = ("maps.app.goo.gl", "goo.gl")
+_COORDINATES = re.compile(r"^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$")
+
+
+def _expand_short_link(url: str) -> str:
+    """maps.app.goo.gl/xyz -> the full google.com/maps/... address it stands for.
+
+    Reads the Location header of each redirect instead of following it, so the
+    server only ever talks to Google's short-link hosts (never to an address
+    someone pasted) and never loads Google's pages.
+    """
+    current = url
+    for _ in range(3):
+        host = urlparse(current).netloc.lower().split(":")[0]
+        if host not in _SHORT_LINK_HOSTS:
+            return current
+        try:
+            resp = requests.get(
+                current,
+                allow_redirects=False,
+                timeout=5,
+                headers={"User-Agent": "Mozilla/5.0 (compatible; Blossom link reader)"},
+            )
+        except requests.RequestException:
+            return current
+        location = resp.headers.get("Location")
+        if resp.status_code not in (301, 302, 303, 307, 308) or not location:
+            return current
+        current = urljoin(current, location)
+    return current
+
+
+def _place_from_url(url: str):
+    """(name, address) written in a full Google Maps address, or (None, None).
+
+    Handles /maps/place/<name>/..., ?q=<name, address> and ?query=... forms,
+    and Google's consent page that wraps the real address in ?continue=.
+    A dropped pin (just coordinates) has no name.
+    """
+    parsed = urlparse(url)
+    params = parse_qs(parsed.query)
+    if params.get("continue"):
+        return _place_from_url(params["continue"][0])
+
+    text = None
+    in_path = re.search(r"/maps/place/([^/@?]+)", parsed.path)
+    if in_path:
+        text = unquote_plus(in_path.group(1))
+    else:
+        for key in ("q", "query"):
+            if params.get(key):
+                text = params[key][0]
+                break
+
+    text = " ".join((text or "").split())
+    if not text or _COORDINATES.match(text) or "°" in text:
+        return None, None
+    name, _, address = text.partition(",")
+    return (name.strip()[:150] or None), (address.strip()[:200] or None)
 
 
 def _fold(value: Optional[str]) -> str:
@@ -407,12 +472,26 @@ def invite_to_date_spot(
     }
 
 
+@router.get("/resolve_link")
+def resolve_map_link(url: str, current_user: UserAuth = Depends(get_current_user)):
+    """The place name inside a pasted Google Maps link, so the share form can
+    fill it in by itself. Returns nulls when the link carries no name (e.g. a
+    dropped pin) - the person then just types it."""
+    link = _clean_map_url(url)
+    if not link:
+        raise HTTPException(status_code=400, detail="Please paste the Google Maps link of the place.")
+    name, address = _place_from_url(_expand_short_link(link))
+    return {"name": name, "address": address}
+
+
 @router.post("", response_model=DateSpotDisplay)
 def create_date_spot(
     name: str = Form(...),
     city: str = Form(...),
     country: str = Form(...),
-    description: str = Form(...),
+    # Optional: the share form is meant to take seconds; a line on why is a
+    # bonus, not a hurdle.
+    description: Optional[str] = Form(None),
     neighborhood: Optional[str] = Form(None),
     map_url: Optional[str] = Form(None),
     category: Optional[str] = Form(None),
@@ -429,14 +508,14 @@ def create_date_spot(
         raise HTTPException(status_code=400, detail="Please give the place a name.")
     if not _tidy(city, 120) or not _tidy(country, 120):
         raise HTTPException(status_code=400, detail="Please say which city and country it's in.")
-    if len(description) < 10:
-        raise HTTPException(
-            status_code=400,
-            detail="Please add a short description (at least 10 characters).",
-        )
+
+    # Required: the link is what makes "Open in Google Maps" land on the exact
+    # place rather than a guess from the name.
+    map_link = _clean_map_url(map_url)
+    if not map_link:
+        raise HTTPException(status_code=400, detail="Please paste the Google Maps link of the place.")
 
     city, country = _canonical_place(db, city, country)
-    map_link = _clean_map_url(map_url)
     spot_category = _clean_category(category)
     spot_price = _clean_price(price)
     spot_best_for = _clean_best_for(best_for)
@@ -500,13 +579,8 @@ def update_date_spot(
         spot.name = name
 
     if "description" in sent:
-        description = (payload.description or "").strip()
-        if len(description) < 10:
-            raise HTTPException(
-                status_code=400,
-                detail="Please add a short description (at least 10 characters).",
-            )
-        spot.description = description
+        # Optional, as when sharing: an empty one is fine.
+        spot.description = (payload.description or "").strip()
 
     if "city" in sent or "country" in sent:
         city = payload.city if "city" in sent else spot.city
