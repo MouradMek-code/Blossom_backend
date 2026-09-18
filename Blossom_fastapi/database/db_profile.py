@@ -114,6 +114,17 @@ def get_all_profiles(db: Session, user: UserAuth):
         .all()
     )
 
+    # People who already liked the viewer stay in Browse (liking someone never
+    # hides you from them), but in a shuffled deck they got lost. Flag them so
+    # the apps can put them first - one tap on the heart and it's a match.
+    liker_ids = {
+        liker_id for (liker_id,) in db.query(DbProfileLike.liker_profile_id)
+        .filter(DbProfileLike.liked_profile_id == current_profile.id)
+        .all()
+    }
+    for profile in profiles:
+        profile.likes_you = profile.id in liker_ids
+
     return profiles
 
 def get_profile_by_id(db:Session,id:int):

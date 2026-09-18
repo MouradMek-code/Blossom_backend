@@ -264,6 +264,9 @@ class ProfileDisplay(BaseModel):
     photos: List[ProfilePhotoLean]
 
     created_at: datetime
+    # Browse only: this person already liked the viewer. Clients put them at
+    # the front of the deck with a "Likes you" tag. False everywhere else.
+    likes_you: bool = False
     # No `user` here: it put every member's username and email into Browse /
     # Matches / Likes You responses (a privacy leak), and loading it cost one
     # extra database query per profile. No client uses it.
