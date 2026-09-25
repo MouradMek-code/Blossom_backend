@@ -146,6 +146,10 @@ class ProfilePhotoLean(BaseModel):
         orm_mode = True
 
 
+class ConnectionUpdate(BaseModel):
+    connection_type: str
+
+
 class ProfileBase(BaseModel):
     bio: Optional[str] = None
 
@@ -186,6 +190,9 @@ class ProfileBase(BaseModel):
 
     # Personality
     personality_type: Optional[str] = None
+
+    # "dating", "language" or "both"; missing means "both".
+    connection_type: Optional[str] = None
 
 
 
@@ -252,12 +259,14 @@ class ProfileDisplay(BaseModel):
     past_relationships_count: Optional[str] = None
     last_breakup_reason: Optional[str] = None
 
-    has_children: str
+    # Optional: language-exchange-only profiles skip the family questions.
+    has_children: Optional[str] = None
     wants_children: Optional[str]
 
     personality_type: Optional[str]
 
-
+    # "dating", "language" (language exchange) or "both".
+    connection_type: Optional[str] = "both"
 
     # Just id + url. ProfilePhotoDisplay repeats the whole profile (bio
     # included) inside every photo, tripling the payload for nothing.

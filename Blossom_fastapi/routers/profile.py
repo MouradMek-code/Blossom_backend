@@ -7,7 +7,7 @@ from database import db_profile,db_message
 from database.models import DbProfile,DbProfilePhoto
 from auth.oauth2 import get_current_user
 from database.database import get_db
-from routers.schemas import ProfileBase, ProfileDisplay, UserAuth,ProfileDisplayforPhoto,BioUpdate
+from routers.schemas import ProfileBase, ProfileDisplay, UserAuth,ProfileDisplayforPhoto,BioUpdate,ConnectionUpdate
 from routers.schemas import UserAuth,ProfilePhotoDisplay
 import cloudinary.uploader
 import cloudinary
@@ -88,6 +88,14 @@ def update_bio(request:BioUpdate,db:Session = Depends(get_db),current_user: User
     result=db_profile.update_bio(db,current_user,request.bio)
     if result is None:
         raise HTTPException(status_code=404,detail="Profile still doesn't exist")
+    return result
+
+@router.put("/connection", response_model=ProfileDisplay)
+def update_connection(request: ConnectionUpdate, db: Session = Depends(get_db), current_user: UserAuth = Depends(get_current_user)):
+    """Dating, language exchange or both."""
+    result = db_profile.update_connection_type(db, current_user, request.connection_type)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Profile still doesn't exist")
     return result
 
 @router.delete("/image/{photo_id}")

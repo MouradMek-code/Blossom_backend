@@ -5,8 +5,35 @@ from datetime import datetime
 from database.models import DbMatch
 from database import db_block
 import cloudinary.uploader
+from fastapi import HTTPException
+
+# What someone is on Blossom for.
+CONNECTION_TYPES = ("dating", "language", "both")
+
+# Who appears in whose Browse: someone only here for dates never sees someone
+# only here for language exchange (and the other way round); "both" sees, and
+# is seen by, everyone.
+COMPATIBLE_CONNECTIONS = {
+    "dating": ("dating", "both"),
+    "language": ("language", "both"),
+    "both": CONNECTION_TYPES,
+}
+
+
+def clean_connection_type(value) -> str:
+    """Missing means "both", the default; anything else must be known."""
+    value = (value or "both").strip().lower()
+    if value not in CONNECTION_TYPES:
+        raise HTTPException(status_code=400, detail="Please choose dating, language exchange or both.")
+    return value
+
+
 def create_profile(db:Session,request:ProfileBase,user:UserAuth):
-    print(request)
+    connection_type = clean_connection_type(request.connection_type)
+    relationship_goal = request.relationship_goal
+    # Language exchange is about friendship; that question is skipped for them.
+    if connection_type == "language" and not relationship_goal:
+        relationship_goal = "Friendship"
     db_profile=DbProfile(
         first_name=user.username,
         bio=request.bio,
@@ -20,7 +47,8 @@ def create_profile(db:Session,request:ProfileBase,user:UserAuth):
         drinking=request.drinking,
         exercise_frequency=request.exercise_frequency,
         has_pets=request.has_pets,
-        relationship_goal=request.relationship_goal,
+        relationship_goal=relationship_goal,
+        connection_type=connection_type,
         first_date_preference=request.first_date_preference,
         past_relationships_count=request.past_relationships_count,
         last_breakup_reason=request.last_breakup_reason,
@@ -98,6 +126,9 @@ def get_all_profiles(db: Session, user: UserAuth):
     ]
     excluded_profile_ids.update(admin_profile_ids)
 
+    mine = current_profile.connection_type or "both"
+    compatible = COMPATIBLE_CONNECTIONS.get(mine, CONNECTION_TYPES)
+
     # ProfileDisplay serialises photos/languages/learning_languages, which are
     # lazy relationships - without eager loading this fires 3 extra queries per
     # profile (1 + 3N). selectinload batches them into 3 queries total.
@@ -109,7 +140,8 @@ def get_all_profiles(db: Session, user: UserAuth):
             selectinload(DbProfile.learning_languages),
         )
         .filter(
-            DbProfile.id.notin_(excluded_profile_ids)
+            DbProfile.id.notin_(excluded_profile_ids),
+            DbProfile.connection_type.in_(compatible),
         )
         .all()
     )
@@ -147,6 +179,20 @@ def update_profile(db:Session,user:UserAuth,city:str,country:str):
     })
     db.commit()
     return profile_db.first()
+
+def update_connection_type(db: Session, user: UserAuth, value: str):
+    """Dating, language exchange or both. Switching to language exchange also
+    makes the relationship goal Friendship, as at sign-up."""
+    connection_type = clean_connection_type(value)
+    profile = db.query(DbProfile).filter(DbProfile.user_id == user.id).first()
+    if not profile:
+        return None
+    profile.connection_type = connection_type
+    if connection_type == "language":
+        profile.relationship_goal = "Friendship"
+    db.commit()
+    return get_profile_by_id(db, profile.id)
+
 
 def update_bio(db:Session,user:UserAuth,bio:str):
 

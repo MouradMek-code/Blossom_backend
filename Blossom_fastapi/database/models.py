@@ -100,6 +100,9 @@ class DbProfile(Base):
     first_date_preference = Column(String(100))
     past_relationships_count = Column(String(50))
     last_breakup_reason = Column(String(100))
+    # What they're on Blossom for: "dating", "language" (language exchange, as
+    # friends) or "both" - the default, and what existing profiles were given.
+    connection_type = Column(String(20), nullable=False, default="both", server_default="both")
 
     # Personality
     personality_type = Column(String(50))

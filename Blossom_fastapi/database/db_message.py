@@ -9,7 +9,12 @@ from database import db_block
 
 def _must_write_first(me: DbProfile, other: DbProfile) -> bool:
     """True if `me` isn't allowed to open this conversation: in a man/woman
-    match, the woman sends the first message."""
+    dating match, the woman sends the first message.
+
+    A match with someone who's only here for language exchange is a language
+    exchange (that's all Browse lets them share), so either can write first."""
+    if "language" in (me.connection_type, other.connection_type):
+        return False
     return {me.gender, other.gender} == {"Man", "Woman"} and me.gender == "Man"
 
 
