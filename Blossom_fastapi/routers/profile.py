@@ -59,8 +59,14 @@ def read_profile(id:int,current_user:UserAuth=Depends(get_current_user),db:Sessi
 
 @router.post("/image",response_model=ProfilePhotoDisplay)
 def upload_image(image:UploadFile=File(...),db:Session = Depends(get_db),current_use: UserAuth=Depends(get_current_user)):
-    result = cloudinary.uploader.upload(image.file)
+    # Check before the (slow) Cloudinary upload, not after it.
     db_profile_instance = db.query(DbProfile).filter(DbProfile.user_id == current_use.id).first()
+    if db_profile_instance is None:
+        raise HTTPException(status_code=404, detail="Please finish your profile before adding photos.")
+    content_type = (image.content_type or "").lower()
+    if content_type and content_type != "application/octet-stream" and not content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Please choose a photo (JPG, PNG, HEIC...).")
+    result = cloudinary.uploader.upload(image.file)
     db_profile_photo = DbProfilePhoto(
         image_url=result["secure_url"],
         public_id=result["public_id"],
