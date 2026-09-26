@@ -1,9 +1,9 @@
 from typing import List
 
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, BackgroundTasks, UploadFile, File, HTTPException
 from fastapi.params import Depends
 from sqlalchemy.orm import Session
-from database import db_profile,db_message
+from database import db_profile,db_message,db_push
 from database.models import DbProfile,DbProfilePhoto
 from auth.oauth2 import get_current_user
 from database.database import get_db
@@ -27,8 +27,11 @@ router = APIRouter(
 )
 
 @router.post("/", response_model=ProfileDisplay)
-def create_profile(request:ProfileBase,db:Session=Depends(get_db),current_use: UserAuth=Depends(get_current_user)):
-    return db_profile.create_profile(db,request,current_use)
+def create_profile(request:ProfileBase,background_tasks:BackgroundTasks,db:Session=Depends(get_db),current_use: UserAuth=Depends(get_current_user)):
+    profile = db_profile.create_profile(db,request,current_use)
+    # Admins get a phone notification (sent after the response).
+    db_push.notify_new_profile(db, background_tasks, profile)
+    return profile
 
 @router.get("/", response_model=ProfileDisplay)
 def read_profile(current_user:UserAuth=Depends(get_current_user),db:Session=Depends(get_db)):

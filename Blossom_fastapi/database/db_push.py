@@ -12,7 +12,7 @@ from fastapi import BackgroundTasks
 from sqlalchemy.orm import Session
 
 from database.database import SessionLocal
-from database.models import DbConversation, DbProfile, DbPushToken
+from database.models import DbConversation, DbProfile, DbPushToken, DbUser
 
 log = logging.getLogger(__name__)
 
@@ -39,6 +39,13 @@ TEXTS = {
         "fr": "🌸 Quelqu'un vous aime",
         "zh": "🌸 有人喜欢你",
         "ar": "🌸 شخص ما معجب بك",
+    },
+    # Admins only.
+    "new_profile": {
+        "en": "🌱 New profile: {name}",
+        "fr": "🌱 Nouveau profil : {name}",
+        "zh": "🌱 新用户资料：{name}",
+        "ar": "🌱 ملف شخصي جديد: {name}",
     },
 }
 
@@ -170,3 +177,28 @@ def notify_like(db: Session, background_tasks: BackgroundTasks, liker_profile_id
     else:
         messages = _messages_for_profile(db, liked_profile_id, "like", "", {"type": "like"})
     _queue(background_tasks, messages)
+
+
+def notify_new_profile(db: Session, background_tasks: BackgroundTasks, profile: DbProfile):
+    """"🌱 New profile: sara · Paris, France" to every admin's phone, so they
+    don't have to keep checking the admin list. Nobody else is told."""
+    tokens = (
+        db.query(DbPushToken)
+        .join(DbUser, DbUser.id == DbPushToken.user_id)
+        .filter(DbUser.is_admin == True, DbUser.id != profile.user_id)  # noqa: E712
+        .all()
+    )
+    place = ", ".join(part for part in (profile.city, profile.country) if part)
+    name = f"{profile.first_name} · {place}" if place else profile.first_name
+    _queue(background_tasks, [
+        {
+            "to": row.token,
+            "title": "Blossom",
+            "body": TEXTS["new_profile"][normalize_language(row.language)].format(name=name),
+            "data": {"type": "new_profile", "profileId": profile.id},
+            "sound": "default",
+            "channelId": "default",
+            "priority": "high",
+        }
+        for row in tokens
+    ])

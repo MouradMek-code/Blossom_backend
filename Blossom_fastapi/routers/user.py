@@ -1,6 +1,6 @@
 import redis
 from  fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 import http.client
 import sib_api_v3_sdk
 from sib_api_v3_sdk.rest import ApiException
@@ -479,7 +479,13 @@ def require_admin(current_user: UserAuth = Depends(get_current_user)):
 
 @router.get("/admin/users")
 def admin_get_all_users(db: Session = Depends(get_db), _: UserAuth = Depends(require_admin)):
-    users = db.query(DbUser).order_by(DbUser.id.desc()).all()
+    # Profiles and photos in two extra queries, not two per user.
+    users = (
+        db.query(DbUser)
+        .options(selectinload(DbUser.profile).selectinload(DbProfile.photos))
+        .order_by(DbUser.id.desc())
+        .all()
+    )
     result = []
     for u in users:
         profile = u.profile
@@ -498,6 +504,8 @@ def admin_get_all_users(db: Session = Depends(get_db), _: UserAuth = Depends(req
                 "country": profile.country,
                 "created_at": str(profile.created_at) if profile.created_at else None,
                 "photo": profile.photos[0].image_url if profile.photos else None,
+                "photos_count": len(profile.photos),
+                "connection_type": profile.connection_type,
             } if profile else None,
         })
     return result
