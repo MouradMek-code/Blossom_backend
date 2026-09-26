@@ -41,6 +41,12 @@ TEXTS = {
         "ar": "🌸 شخص ما معجب بك",
     },
     # Admins only.
+    "test": {
+        "en": "🔔 Notifications work! New profiles will show up here.",
+        "fr": "🔔 Les notifications marchent ! Les nouveaux profils s'afficheront ici.",
+        "zh": "🔔 通知正常！新用户资料会在这里提醒你。",
+        "ar": "🔔 الإشعارات تعمل! ستظهر الملفات الجديدة هنا.",
+    },
     "new_profile": {
         "en": "🌱 New profile: {name}",
         "fr": "🌱 Nouveau profil : {name}",
@@ -105,9 +111,11 @@ def _messages_for_profile(db: Session, profile_id: int, kind: str, name: str, da
 def send_push_messages(messages):
     """POST to Expo in chunks. Runs after the response - must never raise.
     Tokens Expo reports as no longer registered (app uninstalled, data
-    cleared) are removed so we stop sending to them."""
+    cleared) are removed so we stop sending to them.
+    Returns {"sent": n, "errors": [...]} for callers that want to know."""
+    result = {"sent": 0, "errors": []}
     if not messages:
-        return
+        return result
     headers = {"Accept": "application/json", "Content-Type": "application/json"}
     access_token = os.getenv("EXPO_ACCESS_TOKEN")  # only if "enhanced push security" is on
     if access_token:
@@ -121,13 +129,16 @@ def send_push_messages(messages):
             tickets = resp.json().get("data") or []
         except Exception as exc:  # network error, bad JSON, ...
             log.warning("Expo push request failed: %s", exc)
+            result["errors"].append(f"Expo push service unreachable: {exc}")
             continue
         if isinstance(tickets, dict):
             tickets = [tickets]
         for message, ticket in zip(chunk, tickets):
             if ticket.get("status") != "error":
+                result["sent"] += 1
                 continue
             error = (ticket.get("details") or {}).get("error")
+            result["errors"].append(ticket.get("message") or error or "unknown error")
             if error == "DeviceNotRegistered":
                 dead_tokens.append(message["to"])
             else:
@@ -142,6 +153,7 @@ def send_push_messages(messages):
             log.warning("Could not remove dead push tokens: %s", exc)
         finally:
             db.close()
+    return result
 
 
 def _queue(background_tasks: BackgroundTasks, messages):
@@ -202,3 +214,23 @@ def notify_new_profile(db: Session, background_tasks: BackgroundTasks, profile: 
         }
         for row in tokens
     ])
+
+
+def send_test(db: Session, user_id: int):
+    """"🔔 Notifications work!" to every phone of this account, right now,
+    reporting what happened - to check an admin will get the new-profile
+    notifications."""
+    tokens = db.query(DbPushToken).filter(DbPushToken.user_id == user_id).all()
+    result = send_push_messages([
+        {
+            "to": row.token,
+            "title": "Blossom",
+            "body": TEXTS["test"][normalize_language(row.language)],
+            "data": {"type": "new_profile"},
+            "sound": "default",
+            "channelId": "default",
+            "priority": "high",
+        }
+        for row in tokens
+    ])
+    return {"phones": len(tokens), **result}
