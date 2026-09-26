@@ -10,6 +10,8 @@ from database.database import get_db
 from routers.schemas import ProfileBase, ProfileDisplay, UserAuth,ProfileDisplayforPhoto,BioUpdate,ConnectionUpdate
 from routers.schemas import UserAuth,ProfilePhotoDisplay
 import cloudinary.uploader
+from datetime import datetime
+from sqlalchemy import func
 import cloudinary
 import os
 cloudinary.config(
@@ -27,11 +29,9 @@ router = APIRouter(
 )
 
 @router.post("/", response_model=ProfileDisplay)
-def create_profile(request:ProfileBase,background_tasks:BackgroundTasks,db:Session=Depends(get_db),current_use: UserAuth=Depends(get_current_user)):
-    profile = db_profile.create_profile(db,request,current_use)
-    # Admins get a phone notification (sent after the response).
-    db_push.notify_new_profile(db, background_tasks, profile)
-    return profile
+def create_profile(request:ProfileBase,db:Session=Depends(get_db),current_use: UserAuth=Depends(get_current_user)):
+    # Admins are notified later, once the photos are in (see upload_image).
+    return db_profile.create_profile(db,request,current_use)
 
 @router.get("/", response_model=ProfileDisplay)
 def read_profile(current_user:UserAuth=Depends(get_current_user),db:Session=Depends(get_db)):
@@ -61,7 +61,7 @@ def read_profile(id:int,current_user:UserAuth=Depends(get_current_user),db:Sessi
 
 
 @router.post("/image",response_model=ProfilePhotoDisplay)
-def upload_image(image:UploadFile=File(...),db:Session = Depends(get_db),current_use: UserAuth=Depends(get_current_user)):
+def upload_image(background_tasks:BackgroundTasks,image:UploadFile=File(...),db:Session = Depends(get_db),current_use: UserAuth=Depends(get_current_user)):
     # Check before the (slow) Cloudinary upload, not after it.
     db_profile_instance = db.query(DbProfile).filter(DbProfile.user_id == current_use.id).first()
     if db_profile_instance is None:
@@ -78,7 +78,31 @@ def upload_image(image:UploadFile=File(...),db:Session = Depends(get_db),current
     db.add(db_profile_photo)
     db.commit()
     db.refresh(db_profile_photo)
+    _notify_if_just_finished(db, background_tasks, db_profile_instance)
     return db_profile_photo
+
+
+# Sign-up asks for at least 2 photos: with the 2nd one the profile is done.
+PHOTOS_TO_FINISH = 2
+
+
+def _notify_if_just_finished(db: Session, background_tasks: BackgroundTasks, profile: DbProfile):
+    """Tell the admins about a new member once their profile is finished -
+    once per person: completed_at is claimed by a single UPDATE, so two
+    uploads at the same moment can't both notify, and deleting and re-adding
+    photos later doesn't notify again."""
+    if profile.completed_at is not None:
+        return
+    photos = db.query(func.count(DbProfilePhoto.id)).filter(DbProfilePhoto.profile_id == profile.id).scalar()
+    if photos < PHOTOS_TO_FINISH:
+        return
+    claimed = db.query(DbProfile).filter(
+        DbProfile.id == profile.id, DbProfile.completed_at.is_(None)
+    ).update({DbProfile.completed_at: datetime.now()}, synchronize_session=False)
+    db.commit()
+    if claimed:
+        db.refresh(profile)
+        db_push.notify_new_profile(db, background_tasks, profile)
 
 @router.put("/update_city_country", response_model=ProfileDisplay)
 def update_location(city:str,country:str,db:Session = Depends(get_db),current_user: UserAuth=Depends(get_current_user)):

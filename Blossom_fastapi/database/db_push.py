@@ -41,12 +41,6 @@ TEXTS = {
         "ar": "🌸 شخص ما معجب بك",
     },
     # Admins only.
-    "test": {
-        "en": "🔔 Notifications work! New profiles will show up here.",
-        "fr": "🔔 Les notifications marchent ! Les nouveaux profils s'afficheront ici.",
-        "zh": "🔔 通知正常！新用户资料会在这里提醒你。",
-        "ar": "🔔 الإشعارات تعمل! ستظهر الملفات الجديدة هنا.",
-    },
     "new_profile": {
         "en": "🌱 New profile: {name}",
         "fr": "🌱 Nouveau profil : {name}",
@@ -192,8 +186,9 @@ def notify_like(db: Session, background_tasks: BackgroundTasks, liker_profile_id
 
 
 def notify_new_profile(db: Session, background_tasks: BackgroundTasks, profile: DbProfile):
-    """"🌱 New profile: sara · Paris, France" to every admin's phone, so they
-    don't have to keep checking the admin list. Nobody else is told."""
+    """"🌱 New profile: sara · Paris, France" to every admin's phone once the
+    profile is finished (photos in), so they don't have to keep checking the
+    admin list. Nobody else is told."""
     tokens = (
         db.query(DbPushToken)
         .join(DbUser, DbUser.id == DbPushToken.user_id)
@@ -214,23 +209,3 @@ def notify_new_profile(db: Session, background_tasks: BackgroundTasks, profile: 
         }
         for row in tokens
     ])
-
-
-def send_test(db: Session, user_id: int):
-    """"🔔 Notifications work!" to every phone of this account, right now,
-    reporting what happened - to check an admin will get the new-profile
-    notifications."""
-    tokens = db.query(DbPushToken).filter(DbPushToken.user_id == user_id).all()
-    result = send_push_messages([
-        {
-            "to": row.token,
-            "title": "Blossom",
-            "body": TEXTS["test"][normalize_language(row.language)],
-            "data": {"type": "new_profile"},
-            "sound": "default",
-            "channelId": "default",
-            "priority": "high",
-        }
-        for row in tokens
-    ])
-    return {"phones": len(tokens), **result}

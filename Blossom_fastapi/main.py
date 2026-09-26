@@ -6,7 +6,7 @@ from database import models
 from database.database import engine
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from routers import user, post,comment,profile,profile_language,profile_learning_language,likes,match,message,block,report,date_spot,geo,push
+from routers import user, post,comment,profile,profile_language,profile_learning_language,likes,match,message,block,report,date_spot,geo,push,analytics
 from auth import authentication
 
 app = FastAPI()
@@ -25,6 +25,7 @@ app.include_router(report.router)
 app.include_router(date_spot.router)
 app.include_router(geo.router)
 app.include_router(push.router)
+app.include_router(analytics.router)
 @app.api_route("/health", methods=["GET", "HEAD"])
 async def health():
     return {"status": "ok"}
@@ -73,6 +74,9 @@ with engine.begin() as connection:
         "ALTER TABLE \"user\" ADD COLUMN IF NOT EXISTS sessions_valid_after TIMESTAMP"
     ))
     connection.execute(text(
+        "ALTER TABLE \"user\" ADD COLUMN IF NOT EXISTS created_at TIMESTAMP"
+    ))
+    connection.execute(text(
         "ALTER TABLE date_spots ADD COLUMN IF NOT EXISTS map_url VARCHAR(500)"
     ))
     connection.execute(text(
@@ -106,6 +110,22 @@ with engine.begin() as connection:
     connection.execute(text(
         "ALTER TABLE message ALTER COLUMN is_read SET DEFAULT false"
     ))
+    # When sign-up was finished (see profiles.completed_at). Added with a
+    # one-time backfill: profiles that already have their photos count as
+    # finished, so none of them sets off an admin notification later.
+    has_completed_at = connection.execute(text(
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_name = 'profiles' AND column_name = 'completed_at'"
+    )).first()
+    if not has_completed_at:
+        connection.execute(text(
+            "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP"
+        ))
+        connection.execute(text(
+            "UPDATE profiles SET completed_at = COALESCE(created_at, now()) "
+            "WHERE (SELECT COUNT(*) FROM profile_photos "
+            "WHERE profile_photos.profile_id = profiles.id) >= 2"
+        ))
     # One-off data fix: before the neighborhood field existed, these Paris
     # neighborhoods were entered as cities, splitting Paris into three "cities"
     # in the filters. Idempotent - once moved, the WHERE matches nothing.

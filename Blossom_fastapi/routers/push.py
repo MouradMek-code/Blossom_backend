@@ -36,16 +36,3 @@ def unregister_push_token(
     notifications."""
     db_push.unregister_token(db, current_user.id, payload.token)
     return {"ok": True}
-
-
-@router.post("/test")
-def send_test_push(
-    db: Session = Depends(get_db),
-    current_user: UserAuth = Depends(get_current_user),
-):
-    """Admins: send a test notification to this account's phones and say how
-    many there are - 0 means no phone is logged in to this account with
-    notifications allowed, so new-profile notifications can't arrive."""
-    if not getattr(current_user, "is_admin", False):
-        raise HTTPException(status_code=403, detail="Admin access required")
-    return db_push.send_test(db, current_user.id)

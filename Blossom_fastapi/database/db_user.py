@@ -5,6 +5,7 @@ from database.models import DbUser
 from routers.schemas import UserBase
 from sqlalchemy.orm import Session
 from auth import oauth2
+from datetime import datetime
 def create_user(db : Session,request:UserBase):
 
     # Explicit duplicate checks so the client gets a clear 409 with a
@@ -26,7 +27,8 @@ def create_user(db : Session,request:UserBase):
     email=request.email,
     phone_number=request.phone_number,
     date_of_birth=request.date_of_birth,
-    password=HashedPassword.HashedPassword.hash_password(request.password)
+    password=HashedPassword.HashedPassword.hash_password(request.password),
+    created_at=datetime.utcnow(),
     )
     access_token = oauth2.create_access_token(data={"username": request.username})
     try:

@@ -17,6 +17,9 @@ class DbUser(Base):
     # Login sessions issued before this moment are no longer accepted (set on
     # password reset). Whole seconds, to line up with the token's "iat".
     sessions_valid_after = Column(DateTime, nullable=True)
+    # When the account was created (UTC). Empty for accounts from before it
+    # was recorded.
+    created_at = Column(DateTime, nullable=True)
     posts = relationship("DbPost",back_populates="user")
     profile=relationship("DbProfile",back_populates="user",
     uselist=False)
@@ -103,6 +106,8 @@ class DbProfile(Base):
     # What they're on Blossom for: "dating", "language" (language exchange, as
     # friends) or "both" - the default, and what existing profiles were given.
     connection_type = Column(String(20), nullable=False, default="both", server_default="both")
+    # When sign-up was finished (2nd photo) - the admins are notified then, once.
+    completed_at = Column(DateTime, nullable=True)
 
     # Personality
     personality_type = Column(String(50))
@@ -480,3 +485,31 @@ class DbPushToken(Base):
         default=datetime.utcnow,
         onupdate=datetime.utcnow
     )
+
+
+class DbVisit(Base):
+    """One visit to the app or the website (admin dashboard).
+
+    A visit is one sitting: coming back within 30 minutes of the last
+    activity continues it rather than starting a new one. Members are "p:<profile
+    id>" and are counted once per period on the dashboard however often they come;
+    visitors without a profile are "d:<device id>" (a random id the app/browser
+    keeps) and each of their visits counts. No IP address is stored."""
+    __tablename__ = "visits"
+    id = Column(Integer, primary_key=True)
+    created_at = Column(DateTime, nullable=False, index=True)  # UTC
+    last_seen_at = Column(DateTime, nullable=False)  # UTC
+    visitor = Column(String(80), nullable=False, index=True)
+    profile_id = Column(Integer, nullable=True, index=True)  # kept if the profile is deleted
+    device_id = Column(String(64), nullable=True, index=True)
+    platform = Column(String(10), nullable=True)  # "app" | "web"
+    entry = Column(String(120), nullable=True)  # first screen / page
+    language = Column(String(8), nullable=True)
+    timezone = Column(String(64), nullable=True)
+
+
+class DbAdminDevice(Base):
+    """Phones and browsers an admin has used: never counted as visitors, even
+    logged out."""
+    __tablename__ = "analytics_admin_devices"
+    device_id = Column(String(64), primary_key=True)
