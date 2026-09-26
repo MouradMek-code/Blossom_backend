@@ -110,6 +110,14 @@ with engine.begin() as connection:
     connection.execute(text(
         "ALTER TABLE message ALTER COLUMN is_read SET DEFAULT false"
     ))
+    # Phones logged in to an admin account right now keep getting the "new
+    # profile" notifications for good (see admin_alert_token). Idempotent.
+    connection.execute(text(
+        "INSERT INTO admin_alert_token (token, user_id, language) "
+        "SELECT p.token, p.user_id, p.language FROM push_token p "
+        "JOIN \"user\" u ON u.id = p.user_id WHERE u.is_admin "
+        "ON CONFLICT (token) DO NOTHING"
+    ))
     # When sign-up was finished (see profiles.completed_at). Added with a
     # one-time backfill: profiles that already have their photos count as
     # finished, so none of them sets off an admin notification later.

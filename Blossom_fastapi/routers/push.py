@@ -22,7 +22,8 @@ def register_push_token(
     notifications. Safe to call on every app start."""
     if not db_push.is_expo_token(payload.token):
         raise HTTPException(status_code=400, detail="Invalid push token.")
-    db_push.register_token(db, current_user.id, payload.token, payload.language)
+    db_push.register_token(db, current_user.id, payload.token, payload.language,
+                           is_admin=bool(getattr(current_user, "is_admin", False)))
     return {"ok": True}
 
 

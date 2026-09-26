@@ -12,7 +12,7 @@ from fastapi import BackgroundTasks
 from sqlalchemy.orm import Session
 
 from database.database import SessionLocal
-from database.models import DbConversation, DbProfile, DbPushToken, DbUser
+from database.models import DbAdminAlertToken, DbConversation, DbProfile, DbPushToken, DbUser
 
 log = logging.getLogger(__name__)
 
@@ -59,13 +59,24 @@ def normalize_language(language) -> str:
     return code if code in LANGUAGES else "en"
 
 
-def register_token(db: Session, user_id: int, token: str, language=None):
+def register_token(db: Session, user_id: int, token: str, language=None, is_admin: bool = False):
+    language = normalize_language(language)
     row = db.query(DbPushToken).filter(DbPushToken.token == token).first()
     if row:
         row.user_id = user_id  # same phone, possibly another account now
-        row.language = normalize_language(language)
+        row.language = language
     else:
-        db.add(DbPushToken(user_id=user_id, token=token, language=normalize_language(language)))
+        db.add(DbPushToken(user_id=user_id, token=token, language=language))
+    alert = db.get(DbAdminAlertToken, token)
+    if is_admin:
+        # This phone now gets the "new profile" notifications for good.
+        if alert:
+            alert.user_id = user_id
+            alert.language = language
+        else:
+            db.add(DbAdminAlertToken(token=token, user_id=user_id, language=language))
+    elif alert:
+        alert.language = language
     db.commit()
 
 
@@ -79,6 +90,7 @@ def unregister_token(db: Session, user_id: int, token: str):
 
 def delete_user_tokens(db: Session, user_id: int):
     db.query(DbPushToken).filter(DbPushToken.user_id == user_id).delete(synchronize_session=False)
+    db.query(DbAdminAlertToken).filter(DbAdminAlertToken.user_id == user_id).delete(synchronize_session=False)
 
 
 def _messages_for_profile(db: Session, profile_id: int, kind: str, name: str, data: dict):
@@ -142,6 +154,7 @@ def send_push_messages(messages):
         db = SessionLocal()
         try:
             db.query(DbPushToken).filter(DbPushToken.token.in_(dead_tokens)).delete(synchronize_session=False)
+            db.query(DbAdminAlertToken).filter(DbAdminAlertToken.token.in_(dead_tokens)).delete(synchronize_session=False)
             db.commit()
         except Exception as exc:
             log.warning("Could not remove dead push tokens: %s", exc)
@@ -188,24 +201,37 @@ def notify_like(db: Session, background_tasks: BackgroundTasks, liker_profile_id
 def notify_new_profile(db: Session, background_tasks: BackgroundTasks, profile: DbProfile):
     """"🌱 New profile: sara · Paris, France" to every admin's phone once the
     profile is finished (photos in), so they don't have to keep checking the
-    admin list. Nobody else is told."""
-    tokens = (
-        db.query(DbPushToken)
-        .join(DbUser, DbUser.id == DbPushToken.user_id)
-        .filter(DbUser.is_admin == True, DbUser.id != profile.user_id)  # noqa: E712
-        .all()
-    )
+    admin list. Nobody else is told.
+
+    An admin's phones are the ones logged in to the admin account now, plus
+    any phone an admin has used before (admin_alert_token) - so logging out
+    or trying the sign-up on the same phone doesn't stop the notifications.
+    An admin's own new profile only goes to the other admins."""
+    admin_ids = [
+        uid for (uid,) in db.query(DbUser.id).filter(DbUser.is_admin == True, DbUser.id != profile.user_id)  # noqa: E712
+    ]
+    targets = {}  # token -> language
+    if admin_ids:
+        for row in db.query(DbPushToken).filter(DbPushToken.user_id.in_(admin_ids)).all():
+            targets[row.token] = row.language
+        for row in db.query(DbAdminAlertToken).filter(DbAdminAlertToken.user_id.in_(admin_ids)).all():
+            targets.setdefault(row.token, row.language)
+    if not targets:
+        log.warning("Profile %s finished, but no admin phone is registered for notifications", profile.id)
+        return
+    log.info("Profile %s finished: notifying %d admin phone(s)", profile.id, len(targets))
+
     place = ", ".join(part for part in (profile.city, profile.country) if part)
     name = f"{profile.first_name} · {place}" if place else profile.first_name
     _queue(background_tasks, [
         {
-            "to": row.token,
+            "to": token,
             "title": "Blossom",
-            "body": TEXTS["new_profile"][normalize_language(row.language)].format(name=name),
+            "body": TEXTS["new_profile"][normalize_language(language)].format(name=name),
             "data": {"type": "new_profile", "profileId": profile.id},
             "sound": "default",
             "channelId": "default",
             "priority": "high",
         }
-        for row in tokens
+        for token, language in targets.items()
     ])

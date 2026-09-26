@@ -513,3 +513,13 @@ class DbAdminDevice(Base):
     logged out."""
     __tablename__ = "analytics_admin_devices"
     device_id = Column(String(64), primary_key=True)
+
+
+class DbAdminAlertToken(Base):
+    """A phone an admin has used. It keeps getting the "new profile"
+    notifications even after logging out or switching to another account on
+    it - the push_token row follows whoever is logged in, this one stays."""
+    __tablename__ = "admin_alert_token"
+    token = Column(String(255), primary_key=True)
+    user_id = Column(Integer, ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
+    language = Column(String(8), nullable=True)
