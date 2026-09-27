@@ -565,4 +565,55 @@ class DbSpotVoucher(Base):
     expires_at = Column(DateTime, nullable=False)
     used_at = Column(DateTime, nullable=True)
     failed_attempts = Column(Integer, nullable=False, default=0, server_default="0")
+    # When both were reminded that the code is about to expire.
+    reminded_at = Column(DateTime, nullable=True)
     offer = relationship("DbSpotOffer")
+
+
+class DbVenue(Base):
+    """A partner café/restaurant/bar, attached to its date spot. No Blossom
+    account: the owner manages its promotions with a private link
+    (manage_token), the staff check codes with staff_code - one staff code
+    for all its promotions."""
+    __tablename__ = "venues"
+    id = Column(Integer, primary_key=True)
+    spot_id = Column(Integer, ForeignKey("date_spots.id", ondelete="CASCADE"), nullable=False, unique=True)
+    name = Column(String(150), nullable=False)
+    contact_name = Column(String(120), nullable=True)
+    contact_email = Column(String(200), nullable=True)
+    contact_phone = Column(String(40), nullable=True)
+    language = Column(String(8), nullable=True)
+    manage_token = Column(String(64), nullable=False, unique=True, index=True)
+    staff_code = Column(String(8), nullable=False)
+    created_at = Column(DateTime, nullable=False)
+    spot = relationship("DbDateSpot")
+
+
+class DbPartnerRequest(Base):
+    """"Partner with Blossom": a venue asks to offer a promotion to couples -
+    from the public form (a new venue) or its manager page (a new offer).
+    An admin approves (spot, venue and promotion are created) or refuses."""
+    __tablename__ = "partner_requests"
+    id = Column(Integer, primary_key=True)
+    created_at = Column(DateTime, nullable=False, index=True)
+    status = Column(String(12), nullable=False, default="pending", index=True)  # pending | approved | refused
+    venue_id = Column(Integer, ForeignKey("venues.id", ondelete="CASCADE"), nullable=True)  # from a manager page
+    venue_name = Column(String(150), nullable=False)
+    map_url = Column(String(500), nullable=True)
+    city = Column(String(120), nullable=True)
+    country = Column(String(120), nullable=True)
+    about = Column(Text, nullable=True)
+    offer_title = Column(String(120), nullable=False)
+    offer_details = Column(Text, nullable=True)
+    max_couples = Column(Integer, nullable=True)
+    ends_at = Column(DateTime, nullable=True)
+    valid_hours = Column(Integer, nullable=True)
+    contact_name = Column(String(120), nullable=True)
+    contact_email = Column(String(200), nullable=True)
+    contact_phone = Column(String(40), nullable=True)
+    message = Column(Text, nullable=True)
+    language = Column(String(8), nullable=True)
+    reviewed_at = Column(DateTime, nullable=True)
+    refuse_reason = Column(Text, nullable=True)
+    offer_id = Column(Integer, ForeignKey("spot_offers.id", ondelete="SET NULL"), nullable=True)
+    venue = relationship("DbVenue")

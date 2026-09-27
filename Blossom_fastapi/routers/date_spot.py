@@ -468,8 +468,11 @@ def invite_to_date_spot(
     message = db_message.send_message(
         db, conversation_id, profile.id, content, date_spot_id=spot.id
     )
-    db_push.notify_new_message(db, background_tasks, conversation_id, profile.id)
     db_offers.decorate_messages(db, [message])  # the spot's promotion on the card
+    offer = getattr(spot, "offer", None)
+    db_push.notify_spot_invite(
+        db, background_tasks, conversation_id, profile, spot.name, offer["title"] if offer else None,
+    )
     return {
         "conversation_id": conversation_id,
         # from_attributes must be explicit: Pydantic 2 ignores the legacy

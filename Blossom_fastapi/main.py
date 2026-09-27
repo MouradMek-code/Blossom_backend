@@ -6,7 +6,7 @@ from database import models
 from database.database import engine
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from routers import user, post,comment,profile,profile_language,profile_learning_language,likes,match,message,block,report,date_spot,geo,push,analytics,offers
+from routers import user, post,comment,profile,profile_language,profile_learning_language,likes,match,message,block,report,date_spot,geo,push,analytics,offers,partners
 from auth import authentication
 
 app = FastAPI()
@@ -27,6 +27,7 @@ app.include_router(geo.router)
 app.include_router(push.router)
 app.include_router(analytics.router)
 app.include_router(offers.router)
+app.include_router(partners.router)
 @app.api_route("/health", methods=["GET", "HEAD"])
 async def health():
     return {"status": "ok"}
@@ -115,6 +116,9 @@ with engine.begin() as connection:
     connection.execute(text(
         "ALTER TABLE message ADD COLUMN IF NOT EXISTS accepted_at TIMESTAMP"
     ))
+    connection.execute(text(
+        "ALTER TABLE spot_vouchers ADD COLUMN IF NOT EXISTS reminded_at TIMESTAMP"
+    ))
     # Phones logged in to an admin account right now keep getting the "new
     # profile" notifications for good (see admin_alert_token). Idempotent.
     connection.execute(text(
@@ -195,3 +199,33 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# "⏰ Your -20% at Café Lune ends in 5 h": every 10 minutes, remind couples
+# whose promotion code is about to expire (once per code - see
+# db_push.send_voucher_reminders). A background thread keeps it simple; while
+# the server sleeps, reminders simply wait until it wakes up.
+import logging  # noqa: E402
+import threading  # noqa: E402
+import time  # noqa: E402
+
+from database.database import SessionLocal  # noqa: E402
+from database import db_push  # noqa: E402
+
+VOUCHER_REMINDERS_EVERY = 600  # seconds
+
+
+def _voucher_reminder_loop():
+    while True:
+        db = SessionLocal()
+        try:
+            db_push.send_voucher_reminders(db)
+        except Exception as exc:  # never let the loop die
+            logging.getLogger(__name__).warning("Voucher reminders failed: %s", exc)
+        finally:
+            db.close()
+        time.sleep(VOUCHER_REMINDERS_EVERY)
+
+
+@app.on_event("startup")
+def start_voucher_reminders():
+    threading.Thread(target=_voucher_reminder_loop, name="voucher-reminders", daemon=True).start()

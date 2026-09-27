@@ -40,6 +40,26 @@ TEXTS = {
         "zh": "🌸 有人喜欢你",
         "ar": "🌸 شخص ما معجب بك",
     },
+    # A date spot invite - with the spot's promotion when it has one.
+    "spot_invite": {
+        "en": "💌 {name} invites you to {spot}",
+        "fr": "💌 {name} vous invite à {spot}",
+        "zh": "💌 {name} 邀请你去 {spot}",
+        "ar": "💌 {name} يدعوك إلى {spot}",
+    },
+    "spot_invite_promo": {
+        "en": "💌 {name} invites you to {spot} - 🎁 {title} for both of you if you say yes",
+        "fr": "💌 {name} vous invite à {spot} - 🎁 {title} pour vous deux si vous dites oui",
+        "zh": "💌 {name} 邀请你去 {spot} - 🎁 如果你同意，你们两人都能获得：{title}",
+        "ar": "💌 {name} يدعوك إلى {spot} - 🎁 {title} لكما معًا إذا وافقت",
+    },
+    # A couple's code is about to expire (sent once, to both).
+    "promo_reminder": {
+        "en": "⏰ Your {title} at {spot} ends in {hours} h - show your code before then.",
+        "fr": "⏰ Votre « {title} » chez {spot} expire dans {hours} h - montrez votre code avant.",
+        "zh": "⏰ 你在 {spot} 的 {title} 将在 {hours} 小时后过期，请在此之前出示优惠码。",
+        "ar": "⏰ عرضك {title} في {spot} ينتهي خلال {hours} ساعة - أظهر رمزك قبل ذلك.",
+    },
     # A date spot invite accepted - with the promotion when it got them one.
     "invite_yes": {
         "en": "✅ {name} is in for {spot}!",
@@ -54,6 +74,12 @@ TEXTS = {
         "ar": "🎁 {name} موافق على {spot}، وحصلتما على: {title}! الرمز في المحادثة.",
     },
     # Admins only.
+    "partner_request": {
+        "en": "🏪 New partner request: {name} - {title}",
+        "fr": "🏪 Nouvelle demande de partenariat : {name} - {title}",
+        "zh": "🏪 新的合作申请：{name} - {title}",
+        "ar": "🏪 طلب شراكة جديد: {name} - {title}",
+    },
     "new_profile": {
         "en": "🌱 New profile: {name}",
         "fr": "🌱 Nouveau profil : {name}",
@@ -225,6 +251,41 @@ def notify_invite_accepted(db: Session, background_tasks: BackgroundTasks, conve
     ))
 
 
+def _admin_targets(db: Session, exclude_user_id=None):
+    """{token: language} for every admin's phone: the ones logged in to an
+    admin account now, plus any phone an admin has used before
+    (admin_alert_token)."""
+    query = db.query(DbUser.id).filter(DbUser.is_admin == True)  # noqa: E712
+    if exclude_user_id is not None:
+        query = query.filter(DbUser.id != exclude_user_id)
+    admin_ids = [uid for (uid,) in query]
+    targets = {}
+    if admin_ids:
+        for row in db.query(DbPushToken).filter(DbPushToken.user_id.in_(admin_ids)).all():
+            targets[row.token] = row.language
+        for row in db.query(DbAdminAlertToken).filter(DbAdminAlertToken.user_id.in_(admin_ids)).all():
+            targets.setdefault(row.token, row.language)
+    return targets
+
+
+def notify_partner_request(db: Session, background_tasks: BackgroundTasks, request):
+    """"🏪 New partner request: Café Lune - -20% on the bill" to the admins."""
+    targets = _admin_targets(db)
+    _queue(background_tasks, [
+        {
+            "to": token,
+            "title": "Blossom",
+            "body": TEXTS["partner_request"][normalize_language(language)].format(
+                name=request.venue_name, title=request.offer_title),
+            "data": {"type": "partner_request", "requestId": request.id},
+            "sound": "default",
+            "channelId": "default",
+            "priority": "high",
+        }
+        for token, language in targets.items()
+    ])
+
+
 def notify_new_profile(db: Session, background_tasks: BackgroundTasks, profile: DbProfile):
     """"🌱 New profile: sara · Paris, France" to every admin's phone once the
     profile is finished (photos in), so they don't have to keep checking the
@@ -234,15 +295,7 @@ def notify_new_profile(db: Session, background_tasks: BackgroundTasks, profile: 
     any phone an admin has used before (admin_alert_token) - so logging out
     or trying the sign-up on the same phone doesn't stop the notifications.
     An admin's own new profile only goes to the other admins."""
-    admin_ids = [
-        uid for (uid,) in db.query(DbUser.id).filter(DbUser.is_admin == True, DbUser.id != profile.user_id)  # noqa: E712
-    ]
-    targets = {}  # token -> language
-    if admin_ids:
-        for row in db.query(DbPushToken).filter(DbPushToken.user_id.in_(admin_ids)).all():
-            targets[row.token] = row.language
-        for row in db.query(DbAdminAlertToken).filter(DbAdminAlertToken.user_id.in_(admin_ids)).all():
-            targets.setdefault(row.token, row.language)
+    targets = _admin_targets(db, exclude_user_id=profile.user_id)
     if not targets:
         log.warning("Profile %s finished, but no admin phone is registered for notifications", profile.id)
         return
@@ -262,3 +315,38 @@ def notify_new_profile(db: Session, background_tasks: BackgroundTasks, profile: 
         }
         for token, language in targets.items()
     ])
+
+
+def notify_spot_invite(db: Session, background_tasks: BackgroundTasks, conversation_id: int,
+                       sender: DbProfile, spot_name: str, promo_title=None):
+    """"💌 Sara invites you to Café Lune - 🎁 -20% for both of you if you say
+    yes": the gift is what makes people answer, so it's in the notification."""
+    conversation = db.query(DbConversation).filter(DbConversation.id == conversation_id).first()
+    if not conversation:
+        return
+    match = conversation.match
+    recipient_id = match.profile2_id if match.profile1_id == sender.id else match.profile1_id
+    _queue(background_tasks, _messages_for_profile(
+        db, recipient_id, "spot_invite_promo" if promo_title else "spot_invite", sender.first_name,
+        {"type": "message", "conversationId": conversation_id},
+        spot=spot_name, title=promo_title or "",
+    ))
+
+
+def send_voucher_reminders(db: Session, now=None):
+    """Runs every few minutes (see main.py): "⏰ Your -20% at Café Lune ends in
+    5 h" to both, once per code. Returns how many codes were reminded."""
+    from database.db_offers import claim_due_reminders
+
+    messages = []
+    reminded = claim_due_reminders(db, now)
+    for voucher, hours_left in reminded:
+        spot = voucher.offer.spot
+        for profile_id in (voucher.profile1_id, voucher.profile2_id):
+            messages += _messages_for_profile(
+                db, profile_id, "promo_reminder", "",
+                {"type": "voucher", "voucherId": voucher.id},
+                title=voucher.offer.title, spot=spot.name if spot else "", hours=hours_left,
+            )
+    send_push_messages(messages)
+    return len(reminded)

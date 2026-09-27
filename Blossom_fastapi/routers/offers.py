@@ -43,6 +43,11 @@ class RedeemIn(BaseModel):
     staff_code: str = Field(max_length=8)
 
 
+class VenueCodeIn(BaseModel):
+    code: str = Field(max_length=20)
+    staff_code: str = Field(max_length=8)
+
+
 def _utc(value: datetime) -> datetime:
     """Stored as naive UTC like every other date here."""
     if value.tzinfo is not None:
@@ -127,3 +132,23 @@ def redeem(voucher_id: int, payload: RedeemIn, db: Session = Depends(get_db),
            user: UserAuth = Depends(get_current_user)):
     """At the venue: the staff type their code on the couple's phone."""
     return db_offers.redeem(db, voucher_id, _my_profile(db, user), payload.staff_code)
+
+
+# ---- the venue (no account: the staff code is the key) ---------------------------
+
+@router.post("/venue/check")
+def venue_check(payload: VenueCodeIn, db: Session = Depends(get_db)):
+    """blossom-date.com/venue: staff type the couple's code and their staff
+    code on their own phone or till - is it valid?"""
+    return db_offers.venue_check(db, payload.code, payload.staff_code)
+
+
+@router.post("/venue/redeem")
+def venue_redeem(payload: VenueCodeIn, db: Session = Depends(get_db)):
+    return db_offers.venue_redeem(db, payload.code, payload.staff_code)
+
+
+@router.get("/{offer_id}/poster")
+def offer_poster(offer_id: int, db: Session = Depends(get_db)):
+    """The printable counter poster: the promotion and its spot (public)."""
+    return db_offers.poster(db, offer_id)

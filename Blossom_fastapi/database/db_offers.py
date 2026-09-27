@@ -370,3 +370,98 @@ def list_offers(db: Session, now: datetime = None):
     now = now or datetime.utcnow()
     offers = db.query(DbSpotOffer).order_by(DbSpotOffer.created_at.desc()).all()
     return [admin_view(db, o, now) for o in offers]
+
+
+# ---- reminders -------------------------------------------------------------------
+
+def claim_due_reminders(db: Session, now: datetime = None):
+    """Codes to remind about: unused, not expired, and in their last day - or
+    their last half, for codes valid less than 2 days (a 2-hour code gets its
+    reminder at 1 hour left). Each is claimed with one UPDATE, so two server
+    workers never remind twice. Returns [(voucher, hours_left)]."""
+    now = now or datetime.utcnow()
+    candidates = (
+        db.query(DbSpotVoucher)
+        .filter(DbSpotVoucher.used_at.is_(None), DbSpotVoucher.reminded_at.is_(None),
+                DbSpotVoucher.expires_at > now, DbSpotVoucher.expires_at <= now + timedelta(hours=24))
+        .all()
+    )
+    due = []
+    for voucher in candidates:
+        window = min(timedelta(hours=24), (voucher.expires_at - voucher.created_at) / 2)
+        if voucher.expires_at - now > window:
+            continue
+        claimed = db.query(DbSpotVoucher).filter(
+            DbSpotVoucher.id == voucher.id, DbSpotVoucher.reminded_at.is_(None)
+        ).update({DbSpotVoucher.reminded_at: now}, synchronize_session=False)
+        db.commit()
+        if claimed:
+            hours_left = max(1, round((voucher.expires_at - now).total_seconds() / 3600))
+            due.append((voucher, hours_left))
+    return due
+
+
+# ---- the venue checks a code on its own phone or till -----------------------------
+
+NOT_RECOGNISED = "Code or staff code not recognised."
+
+
+def normalize_code(code: str) -> str:
+    """"blsm 7k3f", "7K3F", "BLSM7K3F" -> "BLSM-7K3F"."""
+    raw = "".join(ch for ch in (code or "").upper() if ch.isalnum())
+    if raw.startswith("BLSM"):
+        raw = raw[4:]
+    return f"BLSM-{raw}"
+
+
+def _venue_voucher(db: Session, code: str, staff_code: str) -> DbSpotVoucher:
+    """The voucher, only with the right staff code for its venue. One vague
+    error for any mistake, so codes can't be guessed; 5 wrong staff codes
+    lock a code."""
+    voucher = db.query(DbSpotVoucher).filter(DbSpotVoucher.code == normalize_code(code)).first()
+    if not voucher or voucher.failed_attempts >= MAX_WRONG_STAFF_CODES:
+        raise HTTPException(status_code=400, detail=NOT_RECOGNISED)
+    if (staff_code or "").strip() != voucher.offer.staff_code:
+        voucher.failed_attempts += 1
+        db.commit()
+        raise HTTPException(status_code=400, detail=NOT_RECOGNISED)
+    return voucher
+
+
+def venue_view(voucher: DbSpotVoucher, now: datetime = None):
+    spot = voucher.offer.spot
+    return {
+        **voucher_brief(voucher, now),
+        "spot": {"id": spot.id, "name": spot.name} if spot else None,
+    }
+
+
+def venue_check(db: Session, code: str, staff_code: str, now: datetime = None):
+    return venue_view(_venue_voucher(db, code, staff_code), now)
+
+
+def venue_redeem(db: Session, code: str, staff_code: str, now: datetime = None):
+    now = now or datetime.utcnow()
+    voucher = _venue_voucher(db, code, staff_code)
+    if voucher.used_at:
+        raise HTTPException(status_code=409, detail="This code was already used.")
+    if voucher.expires_at <= now:
+        raise HTTPException(status_code=410, detail="This code has expired.")
+    voucher.used_at = now
+    db.commit()
+    return venue_view(voucher, now)
+
+
+def poster(db: Session, offer_id: int):
+    """What the printable counter poster shows - public, no staff code."""
+    offer = db.get(DbSpotOffer, offer_id)
+    if not offer or not offer.spot:
+        raise HTTPException(status_code=404, detail="Promotion not found.")
+    spot = offer.spot
+    return {
+        "id": offer.id,
+        "title": offer.title,
+        "details": offer.details,
+        "valid_hours": offer.valid_hours,
+        "spot": {"id": spot.id, "name": spot.name, "city": spot.city, "neighborhood": spot.neighborhood},
+    }
