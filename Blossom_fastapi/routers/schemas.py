@@ -366,6 +366,28 @@ class MatchDisplay(BaseModel):
 class MessageCreate(BaseModel):
     content: str
 
+class OfferPublic(BaseModel):
+    """A venue's promotion for couples, as anyone sees it on a date spot."""
+    id: int
+    title: str
+    details: Optional[str] = None
+    remaining: Optional[int] = None  # None = no limit
+    ends_at: datetime  # UTC: open to new couples until then
+    valid_hours: int  # how long a couple then has to use it
+
+
+class VoucherBrief(BaseModel):
+    """A couple's promotion code, as the chat shows it."""
+    id: int
+    code: str
+    title: str
+    details: Optional[str] = None
+    created_at: datetime
+    expires_at: datetime  # UTC
+    used_at: Optional[datetime] = None
+    status: str  # "active" | "used" | "expired"
+
+
 class DateSpotSummary(BaseModel):
     """The slice of a date spot a chat invite card needs."""
     id: int
@@ -376,6 +398,7 @@ class DateSpotSummary(BaseModel):
     image_url: Optional[str] = None
     category: Optional[str] = None
     price: Optional[str] = None
+    offer: Optional[OfferPublic] = None
 
     class Config:
         orm_mode = True
@@ -389,6 +412,10 @@ class MessageDisplay(BaseModel):
     # the spot has since been deleted.
     date_spot_id: Optional[int] = None
     date_spot: Optional[DateSpotSummary] = None
+    # Invites: when the other person said "I'm in", and the couple's promotion
+    # code if that got them one.
+    accepted_at: Optional[datetime] = None
+    voucher: Optional[VoucherBrief] = None
 
     class Config:
         orm_mode = True
@@ -489,6 +516,8 @@ class DateSpotDisplay(BaseModel):
     map_click_count: int = 0
     created_at: Optional[datetime] = None
     profile: Optional[DateSpotAuthor] = None
+    # The venue's current promotion for couples, if any.
+    offer: Optional[OfferPublic] = None
 
     # Stored as "First date,Casual"; clients get a proper list.
     @field_validator("best_for", mode="before")

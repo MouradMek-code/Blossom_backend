@@ -40,6 +40,19 @@ TEXTS = {
         "zh": "🌸 有人喜欢你",
         "ar": "🌸 شخص ما معجب بك",
     },
+    # A date spot invite accepted - with the promotion when it got them one.
+    "invite_yes": {
+        "en": "✅ {name} is in for {spot}!",
+        "fr": "✅ {name} est partant·e pour {spot} !",
+        "zh": "✅ {name} 答应一起去 {spot}！",
+        "ar": "✅ {name} موافق على الذهاب إلى {spot}!",
+    },
+    "invite_yes_promo": {
+        "en": "🎁 {name} is in for {spot} - you both got: {title}! Your code is in the chat.",
+        "fr": "🎁 {name} est partant·e pour {spot} : vous avez gagné « {title} » ! Votre code est dans la discussion.",
+        "zh": "🎁 {name} 答应一起去 {spot}，你们获得了：{title}！优惠码在聊天中。",
+        "ar": "🎁 {name} موافق على {spot}، وحصلتما على: {title}! الرمز في المحادثة.",
+    },
     # Admins only.
     "new_profile": {
         "en": "🌱 New profile: {name}",
@@ -93,7 +106,7 @@ def delete_user_tokens(db: Session, user_id: int):
     db.query(DbAdminAlertToken).filter(DbAdminAlertToken.user_id == user_id).delete(synchronize_session=False)
 
 
-def _messages_for_profile(db: Session, profile_id: int, kind: str, name: str, data: dict):
+def _messages_for_profile(db: Session, profile_id: int, kind: str, name: str, data: dict, **extra):
     """One push per phone of the person behind profile_id, each in that
     phone's language."""
     profile = db.query(DbProfile).filter(DbProfile.id == profile_id).first()
@@ -104,7 +117,7 @@ def _messages_for_profile(db: Session, profile_id: int, kind: str, name: str, da
         {
             "to": row.token,
             "title": "Blossom",
-            "body": TEXTS[kind][normalize_language(row.language)].format(name=name or ""),
+            "body": TEXTS[kind][normalize_language(row.language)].format(name=name or "", **extra),
             "data": data,
             "sound": "default",
             "channelId": "default",
@@ -196,6 +209,20 @@ def notify_like(db: Session, background_tasks: BackgroundTasks, liker_profile_id
     else:
         messages = _messages_for_profile(db, liked_profile_id, "like", "", {"type": "like"})
     _queue(background_tasks, messages)
+
+
+
+def notify_invite_accepted(db: Session, background_tasks: BackgroundTasks, conversation_id: int,
+                           inviter_profile_id: int, accepter_name: str, spot_name: str, promo_title=None):
+    """"✅ Leo is in for Café X!" to the one who sent the invite - with the
+    promotion they both got, if any. The one who tapped "I'm in" sees it on
+    screen already."""
+    kind = "invite_yes_promo" if promo_title else "invite_yes"
+    _queue(background_tasks, _messages_for_profile(
+        db, inviter_profile_id, kind, accepter_name,
+        {"type": "message", "conversationId": conversation_id},
+        spot=spot_name, title=promo_title or "",
+    ))
 
 
 def notify_new_profile(db: Session, background_tasks: BackgroundTasks, profile: DbProfile):

@@ -6,7 +6,7 @@ from database import models
 from database.database import engine
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from routers import user, post,comment,profile,profile_language,profile_learning_language,likes,match,message,block,report,date_spot,geo,push,analytics
+from routers import user, post,comment,profile,profile_language,profile_learning_language,likes,match,message,block,report,date_spot,geo,push,analytics,offers
 from auth import authentication
 
 app = FastAPI()
@@ -26,6 +26,7 @@ app.include_router(date_spot.router)
 app.include_router(geo.router)
 app.include_router(push.router)
 app.include_router(analytics.router)
+app.include_router(offers.router)
 @app.api_route("/health", methods=["GET", "HEAD"])
 async def health():
     return {"status": "ok"}
@@ -109,6 +110,10 @@ with engine.begin() as connection:
     ))
     connection.execute(text(
         "ALTER TABLE message ALTER COLUMN is_read SET DEFAULT false"
+    ))
+    # "I'm in" on a date spot invite (promotions for couples).
+    connection.execute(text(
+        "ALTER TABLE message ADD COLUMN IF NOT EXISTS accepted_at TIMESTAMP"
     ))
     # Phones logged in to an admin account right now keep getting the "new
     # profile" notifications for good (see admin_alert_token). Idempotent.

@@ -308,6 +308,9 @@ class DbMessage(Base):
     )
     date_spot = relationship("DbDateSpot")
 
+    # When the other person said "I'm in" to this date spot invite.
+    accepted_at = Column(DateTime, nullable=True)
+
     # Whether the recipient has opened the conversation since this arrived.
     # Chats are 1:1, so "recipient" is simply the participant who didn't send
     # it. Drives the unread badges on Messages.
@@ -523,3 +526,43 @@ class DbAdminAlertToken(Base):
     token = Column(String(255), primary_key=True)
     user_id = Column(Integer, ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
     language = Column(String(8), nullable=True)
+
+
+class DbSpotOffer(Base):
+    """A venue's promotion for Blossom couples ("-20% on the bill", "a free
+    dessert"...), published by an admin on a date spot. A matched couple gets
+    it when one invites the other to the spot and the other says yes - first
+    come, first served when max_couples is set. The venue gives it, Blossom
+    doesn't pay anything."""
+    __tablename__ = "spot_offers"
+    id = Column(Integer, primary_key=True)
+    spot_id = Column(Integer, ForeignKey("date_spots.id", ondelete="CASCADE"), nullable=False, index=True)
+    title = Column(String(120), nullable=False)
+    details = Column(Text, nullable=True)
+    max_couples = Column(Integer, nullable=True)  # None = no limit
+    ends_at = Column(DateTime, nullable=False)  # UTC: no new couples after this
+    valid_hours = Column(Integer, nullable=False)  # how long a couple has to use it
+    # Typed by the venue's staff on the couple's phone to mark it used.
+    staff_code = Column(String(8), nullable=False)
+    active = Column(Boolean, nullable=False, default=True, server_default="true")
+    created_at = Column(DateTime, nullable=False)
+    spot = relationship("DbDateSpot")
+
+
+class DbSpotVoucher(Base):
+    """A couple's promotion: one code for the two of them, to use before
+    expires_at (then it's lost)."""
+    __tablename__ = "spot_vouchers"
+    __table_args__ = (UniqueConstraint("offer_id", "profile1_id", "profile2_id", name="uq_voucher_couple"),)
+    id = Column(Integer, primary_key=True)
+    offer_id = Column(Integer, ForeignKey("spot_offers.id", ondelete="CASCADE"), nullable=False, index=True)
+    # The couple, smaller profile id first. Plain ids: a voucher outlives an unmatch.
+    profile1_id = Column(Integer, nullable=False, index=True)
+    profile2_id = Column(Integer, nullable=False, index=True)
+    message_id = Column(Integer, nullable=True)  # the invite it came from
+    code = Column(String(12), nullable=False, unique=True)
+    created_at = Column(DateTime, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    used_at = Column(DateTime, nullable=True)
+    failed_attempts = Column(Integer, nullable=False, default=0, server_default="0")
+    offer = relationship("DbSpotOffer")

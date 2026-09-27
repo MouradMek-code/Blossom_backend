@@ -11,7 +11,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from sqlalchemy.orm import Session, selectinload
 
 from auth.oauth2 import get_current_user
-from database import db_message, db_profile, db_push
+from database import db_message, db_offers, db_profile, db_push
 from database.database import get_db
 from database.models import DbDateSpot, DbMatch, DbProfile, DbUser
 from database.starter_spots import STARTER_CITY, STARTER_COUNTRY, STARTER_SPOTS
@@ -286,10 +286,15 @@ def list_date_spots(
         query = query.filter(DbDateSpot.best_for.ilike(f"%{best_for}%"))
     # Spots with a photo first - it's a visual page and the first spot becomes
     # the featured hero - then newest first.
-    return query.order_by(
+    spots = query.order_by(
         DbDateSpot.image_url.is_(None),
         DbDateSpot.created_at.desc(),
     ).all()
+    # The venues' promotions for couples, shown to everyone (visitors too).
+    offers = db_offers.public_offers(db, [spot.id for spot in spots])
+    for spot in spots:
+        spot.offer = offers.get(spot.id)
+    return spots
 
 
 @router.get("/locations")
@@ -464,6 +469,7 @@ def invite_to_date_spot(
         db, conversation_id, profile.id, content, date_spot_id=spot.id
     )
     db_push.notify_new_message(db, background_tasks, conversation_id, profile.id)
+    db_offers.decorate_messages(db, [message])  # the spot's promotion on the card
     return {
         "conversation_id": conversation_id,
         # from_attributes must be explicit: Pydantic 2 ignores the legacy

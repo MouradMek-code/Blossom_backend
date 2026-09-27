@@ -138,7 +138,7 @@ def get_messages(
     if unread.update({DbMessage.is_read: True}, synchronize_session=False):
         db.commit()
 
-    return (
+    messages = (
         db.query(DbMessage)
         # Chat polls this every few seconds; load invite cards' spots in one
         # extra query instead of one per invite.
@@ -149,6 +149,9 @@ def get_messages(
         .order_by(DbMessage.created_at)
         .all()
     )
+    # Invite cards: the spot's promotion, and the couple's code.
+    from database.db_offers import decorate_messages
+    return decorate_messages(db, messages)
 
 
 def get_conversation_details(
