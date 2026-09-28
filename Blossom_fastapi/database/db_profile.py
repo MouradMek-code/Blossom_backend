@@ -117,11 +117,13 @@ def get_all_profiles(db: Session, user: UserAuth):
 
     excluded_profile_ids.update(db_block.get_block_relation_ids(db, current_profile.id))
 
-    # Exclude admin accounts from browse (single join instead of two queries)
+    # Exclude admin accounts from browse (single join instead of two queries),
+    # and profiles an admin made for a friend who hasn't confirmed them yet.
+    from database.db_friend_profiles import pending_filter
     admin_profile_ids = [
         p_id for (p_id,) in db.query(DbProfile.id)
         .join(DbUser, DbUser.id == DbProfile.user_id)
-        .filter(DbUser.is_admin == True)
+        .filter((DbUser.is_admin == True) | pending_filter())
         .all()
     ]
     excluded_profile_ids.update(admin_profile_ids)

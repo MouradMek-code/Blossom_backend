@@ -1,12 +1,8 @@
 import redis
 from  fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, selectinload
-import http.client
 import sib_api_v3_sdk
 from sib_api_v3_sdk.rest import ApiException
-import json
-from vonage import Auth, Vonage
-from vonage_messages import Sms
 from routers.schemas import VerifyOTPRequest, ForgotPasswordRequest, ResetPasswordRequest
 from database.models import DbUser, DbProfile, DbMatch, DbProfileLike
 from datetime import datetime, timedelta
@@ -22,8 +18,6 @@ import os
 
 load_dotenv()
 
-INFOBIP_API_KEY = os.getenv("INFOBIP_API_KEY")
-INFOBIP_BASE_URL = os.getenv("INFOBIP_BASE_URL")
 BREVO_API_KEY = os.getenv("BREVO_API_KEY")
 import random
 router = APIRouter(
@@ -35,41 +29,9 @@ import re
 def create_user(request:UserBase,db:Session = Depends(get_db)):
 
     return db_user.create_user(db,request)
-@router.post("/verify")
-async def verify_user(request:UserBase,db:Session = Depends(get_db)):
-    db_username = db.query(DbUser).filter(DbUser.username == request.username).first()
-    if db_username:
-        raise HTTPException(status_code=409, detail="This username is already taken. Please choose another.")
-    db_email = db.query(DbUser).filter(DbUser.email == request.email).first()
-    if db_email:
-        raise HTTPException(status_code=409, detail="An account with this email already exists. Try logging in instead.")
-    if request.phone_number:
-        db_phone = db.query(DbUser).filter(DbUser.phone_number == request.phone_number).first()
-        if db_phone:
-            raise HTTPException(status_code=409, detail="An account with this phone number already exists.")
-    phone_number=request.phone_number
-    otp = str(random.randint(100000, 999999))
-
-    db_otp = OTP(
-        phone_number=phone_number,
-        code=otp,
-        expires_at=datetime.now() + timedelta(minutes=10)
-    )
-
-    db.add(db_otp)
-    db.commit()
-    phone_number = str(phone_number)
-
-    phone_number = phone_number.replace("tel:", "")
-    phone_number = re.sub(r"[^\d+]", "", phone_number)
-    result=await send_sms_vonage(phone_number, otp)
-
-    if result.get("messages"):
-        return {"messages": "sent","detail":result,"phone":phone_number}
-
-    raise HTTPException(status_code=400, detail=result)
-
-
+# Sign-up codes go by email (/user/send_email). The SMS routes
+# (/user/verify, /user/verify-phone) and their Vonage/Infobip keys are gone:
+# nothing called them any more.
 @router.get('/all', response_model=list[UserDisplay])
 def get_all_users(db:Session = Depends(get_db)):
     return db_user.get_all_users(db)
@@ -139,87 +101,12 @@ def get_badges(db: Session = Depends(get_db), current_user: UserAuth = Depends(g
 def get_user_by_id(id:int,db:Session = Depends(get_db)):
     return db_user.get_user_by_id(db,id)
 
+# Accounts are deleted only by their owner (DELETE /user/me) or an admin
+# (DELETE /user/admin/users/{id}). There used to be DELETE /user/{id} and
+# DELETE /user/all with no login at all - anyone could delete any account.
 @router.delete('/me')
 def delete_my_account(db: Session = Depends(get_db), current_user: UserAuth = Depends(get_current_user)):
     return db_profile.delete_account(db, current_user)
-
-@router.delete('/all')
-def delete_all_users(db:Session = Depends(get_db)):
-    return db_user.delete_all_users(db)
-
-@router.delete('/{id}')
-def delete_user_by_id(id:int,db:Session = Depends(get_db)):
-    return db_user.delete_user_by_id(db,id)
-
-
-@router.post("/verify-phone")
-def verify_otp(request:VerifyOTPRequest,db:Session = Depends(get_db)):
-
-    record = db.query(OTP).filter(
-        OTP.phone_number == request.phone_number
-    ).order_by(OTP.id.desc()).first()
-
-    if not record:
-        raise HTTPException(400, "OTP not found")
-
-    if record.expires_at < datetime.utcnow():
-        raise HTTPException(400, "OTP expired")
-
-    if record.code != request.otp:
-        raise HTTPException(400, "Invalid OTP")
-
-    # delete after success
-    db.query(OTP).delete()
-    db.commit()
-    return {"message": "Phone verified"}
-
-async def send_sms(phone_number: str, otp: str):
-
-    conn = http.client.HTTPSConnection(f"{INFOBIP_BASE_URL}")
-
-    headers = {
-        "Authorization": f"App {INFOBIP_API_KEY}",
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-    }
-
-
-    payload = json.dumps({
-        "messages": [
-            {
-                "destinations": [
-                    {
-                        "to": phone_number
-                    }
-                ],
-                "sender": "ServiceSMS",
-                "content": {
-                    "text": f"BLOSSOM dating App,Your verification code is: {otp}"
-                }
-            }
-        ]
-    })
-    conn.request("POST", "/sms/3/messages", payload, headers)
-    res = conn.getresponse()
-
-    data = res.read().decode("utf-8")
-
-    return json.loads(data)
-
-async def send_sms_vonage(phone_number: str, otp: str):
-    client = Vonage(
-        Auth(
-            api_key="fc2f40f2",
-            api_secret="8xh74e0vM6pIofw0",
-        )
-    )
-
-    response = client.messages.send(
-        Sms(to="33663376944", from_="Vonage APIs", text=f"BLOSSOM dating App,Your verification code is: {otp}")
-    )
-
-    return response
-
 
 
 async def send_email_otp(email: str,phone_number:str, otp: str):
@@ -495,6 +382,8 @@ def admin_get_all_users(db: Session = Depends(get_db), _: UserAuth = Depends(req
             "email": u.email,
             "date_of_birth": str(u.date_of_birth) if u.date_of_birth else None,
             "is_admin": u.is_admin,
+            # Made by an admin for a friend who hasn't confirmed it yet.
+            "pending_friend": u.created_by is not None and u.claimed_at is None,
             "profile": {
                 "id": profile.id,
                 "first_name": profile.first_name,
@@ -558,6 +447,11 @@ def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db))
         raise HTTPException(404, "User not found")
 
     user.password = HashedPassword.HashedPassword.hash_password(request.new_password)
+    # A friend's profile made by an admin: the code proves the email is
+    # theirs, so this counts as confirming it (as the email link would).
+    from database import db_friend_profiles
+    if db_friend_profiles.is_pending(user):
+        db_friend_profiles.mark_claimed(db, user)
     # Log out every existing session (other phones, a thief's copy); the user
     # logs back in with the new password.
     user.sessions_valid_after = datetime.utcnow().replace(microsecond=0)

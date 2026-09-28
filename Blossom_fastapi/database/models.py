@@ -20,6 +20,14 @@ class DbUser(Base):
     # When the account was created (UTC). Empty for accounts from before it
     # was recorded.
     created_at = Column(DateTime, nullable=True)
+    # Profiles an admin made for a friend (see db_friend_profiles): who made it,
+    # and the friend's confirmation. Until they confirm from the email link
+    # (claimed_at), the profile stays out of Browse and nobody can log in.
+    created_by = Column(Integer, nullable=True)
+    claim_token = Column(String(64), nullable=True, unique=True, index=True)
+    claim_sent_at = Column(DateTime, nullable=True)
+    claim_language = Column(String(5), nullable=True)
+    claimed_at = Column(DateTime, nullable=True)
     posts = relationship("DbPost",back_populates="user")
     profile=relationship("DbProfile",back_populates="user",
     uselist=False)

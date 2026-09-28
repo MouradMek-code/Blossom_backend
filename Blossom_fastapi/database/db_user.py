@@ -54,23 +54,6 @@ def get_user_by_id(db:Session,id:int):
         raise HTTPException(status_code=404, detail="User not found")
     return db.query(DbUser).filter(DbUser.id == id).first()
 
-def delete_user_by_id(db:Session,id:int):
-
-    db_user = db.query(DbUser).filter(DbUser.id == id).first()
-    if not db_user:
-        raise HTTPException(status_code=404, detail="User not found")
-    db.delete(db_user)
-    db.commit()
-    return {"message":f"User with id {id} has been deleted"}
-
-def delete_all_users(db:Session):
-    try:
-        db.query(DbUser).delete()
-        db.commit()
-    except:
-        raise HTTPException(status_code=404, detail="error on deleting all users")
-    return {"message":f"Users had been deleted"}
-
 def get_user_by_username(db:Session,username:str):
     user=db.query(DbUser).filter(DbUser.username == username).first()
     if not user:

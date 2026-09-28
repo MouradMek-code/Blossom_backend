@@ -531,3 +531,56 @@ class DateSpotDisplay(BaseModel):
 
     class Config:
         orm_mode = True
+
+
+# ---- Profiles an admin creates for a friend (see db_friend_profiles) --------
+class FriendProfileCreate(BaseModel):
+    first_name: str = Field(min_length=1, max_length=60)
+    email: EmailStr
+    date_of_birth: date
+    # Language of the email the friend gets: en, fr, zh or ar.
+    language: Optional[str] = None
+    city: str
+    country: str
+    connection_type: Optional[str] = None
+    bio: Optional[str] = Field(default=None, max_length=2000)
+    age: Optional[str] = None
+    gender: Optional[str] = None
+    sexual_orientation: Optional[str] = None
+    height_cm: Optional[str] = None
+    occupation: Optional[str] = None
+    education: Optional[str] = None
+    smoking: Optional[str] = None
+    drinking: Optional[str] = None
+    exercise_frequency: Optional[str] = None
+    has_pets: Optional[str] = None
+    relationship_goal: Optional[str] = None
+    first_date_preference: Optional[str] = None
+    past_relationships_count: Optional[str] = None
+    last_breakup_reason: Optional[str] = None
+    has_children: Optional[str] = None
+    wants_children: Optional[str] = None
+    personality_type: Optional[str] = None
+    languages: List[str] = []
+    learning_languages: List[str] = []
+
+    @field_validator("date_of_birth")
+    @classmethod
+    def must_be_adult(cls, value: date) -> date:
+        today = date.today()
+        age = today.year - value.year - ((today.month, today.day) < (value.month, value.day))
+        if age < MIN_SIGNUP_AGE:
+            raise ValueError(f"Your friend must be at least {MIN_SIGNUP_AGE} years old")
+        if age > 120:
+            raise ValueError("Please check the date of birth")
+        return value
+
+
+class FriendProfileSend(BaseModel):
+    language: Optional[str] = None
+
+
+class FriendProfileClaim(BaseModel):
+    password: str = Field(min_length=8, max_length=100)
+    # The friend ticked "I'm 18+ and I accept the terms and privacy policy".
+    accept_terms: bool
