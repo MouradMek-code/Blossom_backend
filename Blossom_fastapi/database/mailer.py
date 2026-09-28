@@ -10,7 +10,7 @@ log = logging.getLogger(__name__)
 SENDER = {"name": "Blossom", "email": "mourad.meknioui@gmail.com"}
 
 
-def send_email(to: str, subject: str, html: str) -> bool:
+def send_email(to: str, subject: str, html: str, reply_to: dict = None) -> bool:
     api_key = os.getenv("BREVO_API_KEY")
     if not to or not api_key:
         log.warning("Email to %s not sent: %s", to, "no address" if not to else "no BREVO_API_KEY")
@@ -19,9 +19,10 @@ def send_email(to: str, subject: str, html: str) -> bool:
         configuration = sib_api_v3_sdk.Configuration()
         configuration.api_key["api-key"] = api_key
         api = sib_api_v3_sdk.TransactionalEmailsApi(sib_api_v3_sdk.ApiClient(configuration))
-        api.send_transac_email(sib_api_v3_sdk.SendSmtpEmail(
-            to=[{"email": to}], sender=SENDER, subject=subject, html_content=html,
-        ))
+        email = sib_api_v3_sdk.SendSmtpEmail(to=[{"email": to}], sender=SENDER, subject=subject, html_content=html)
+        if reply_to:
+            email.reply_to = reply_to  # "Reply" answers the person who wrote
+        api.send_transac_email(email)
         return True
     except Exception as exc:  # network, quota, bad address...
         log.warning("Email to %s failed: %s", to, exc)

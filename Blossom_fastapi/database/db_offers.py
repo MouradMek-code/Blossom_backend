@@ -13,7 +13,8 @@ How it works:
     30 days; both profiles must be finished (photos in).
 """
 import secrets
-from collections import Counter
+import threading
+from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 
 from fastapi import HTTPException
@@ -402,8 +403,39 @@ def claim_due_reminders(db: Session, now: datetime = None):
 
 
 # ---- the venue checks a code on its own phone or till -----------------------------
+#
+# Staff type the couple's code and their staff code. Every answer says exactly
+# what's wrong (staff code / couple's code / another place), so a real mistake
+# is easy to fix. Guessing is stopped per device instead: too many wrong tries
+# in an hour and that device has to wait.
 
-NOT_RECOGNISED = "Code or staff code not recognised."
+VENUE_MISTAKES_PER_HOUR = 30
+_venue_mistakes = defaultdict(list)  # device -> times of wrong tries (per server process)
+_venue_mistakes_lock = threading.Lock()
+
+
+def _venue_error(status: int, reason: str, message: str):
+    # {"reason": ..., "message": ...}: the page shows its own translation of
+    # `reason`, other clients show `message`.
+    raise HTTPException(status_code=status, detail={"reason": reason, "message": message})
+
+
+def _recent_mistakes(device: str, now: datetime):
+    recent = [t for t in _venue_mistakes.get(device, []) if t > now - timedelta(hours=1)]
+    _venue_mistakes[device] = recent
+    return recent
+
+
+def _check_throttle(device: str, now: datetime):
+    with _venue_mistakes_lock:
+        if len(_recent_mistakes(device, now)) >= VENUE_MISTAKES_PER_HOUR:
+            _venue_error(429, "too_many", "Too many wrong tries from this device. Please wait a little and try again.")
+
+
+def _mistake(device: str, now: datetime, reason: str, message: str):
+    with _venue_mistakes_lock:
+        _recent_mistakes(device, now).append(now)
+    _venue_error(400, reason, message)
 
 
 def normalize_code(code: str) -> str:
@@ -414,17 +446,22 @@ def normalize_code(code: str) -> str:
     return f"BLSM-{raw}"
 
 
-def _venue_voucher(db: Session, code: str, staff_code: str) -> DbSpotVoucher:
-    """The voucher, only with the right staff code for its venue. One vague
-    error for any mistake, so codes can't be guessed; 5 wrong staff codes
-    lock a code."""
+def _venue_voucher(db: Session, code: str, staff_code: str, device: str = "", now: datetime = None) -> DbSpotVoucher:
+    now = now or datetime.utcnow()
+    _check_throttle(device, now)
+    staff_code = (staff_code or "").strip()
+    if not staff_code or not db.query(DbSpotOffer.id).filter(DbSpotOffer.staff_code == staff_code).first():
+        _mistake(device, now, "staff_code", "Staff code not recognised.")
     voucher = db.query(DbSpotVoucher).filter(DbSpotVoucher.code == normalize_code(code)).first()
-    if not voucher or voucher.failed_attempts >= MAX_WRONG_STAFF_CODES:
-        raise HTTPException(status_code=400, detail=NOT_RECOGNISED)
-    if (staff_code or "").strip() != voucher.offer.staff_code:
-        voucher.failed_attempts += 1
+    if not voucher:
+        _mistake(device, now, "code", "Couple's code not recognised - check the letters, e.g. BLSM-7K3F.")
+    if voucher.offer.staff_code != staff_code:
+        _mistake(device, now, "other_place", "This code is for another place.")
+    if voucher.failed_attempts:
+        # The venue's own staff code: it unlocks a code locked by wrong
+        # tries on the couple's phone.
+        voucher.failed_attempts = 0
         db.commit()
-        raise HTTPException(status_code=400, detail=NOT_RECOGNISED)
     return voucher
 
 
@@ -436,17 +473,17 @@ def venue_view(voucher: DbSpotVoucher, now: datetime = None):
     }
 
 
-def venue_check(db: Session, code: str, staff_code: str, now: datetime = None):
-    return venue_view(_venue_voucher(db, code, staff_code), now)
+def venue_check(db: Session, code: str, staff_code: str, device: str = "", now: datetime = None):
+    return venue_view(_venue_voucher(db, code, staff_code, device, now), now)
 
 
-def venue_redeem(db: Session, code: str, staff_code: str, now: datetime = None):
+def venue_redeem(db: Session, code: str, staff_code: str, device: str = "", now: datetime = None):
     now = now or datetime.utcnow()
-    voucher = _venue_voucher(db, code, staff_code)
+    voucher = _venue_voucher(db, code, staff_code, device, now)
     if voucher.used_at:
-        raise HTTPException(status_code=409, detail="This code was already used.")
+        _venue_error(409, "used", "This code was already used.")
     if voucher.expires_at <= now:
-        raise HTTPException(status_code=410, detail="This code has expired.")
+        _venue_error(410, "expired", "This code has expired.")
     voucher.used_at = now
     db.commit()
     return venue_view(voucher, now)

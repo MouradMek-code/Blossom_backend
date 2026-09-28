@@ -74,6 +74,12 @@ TEXTS = {
         "ar": "🎁 {name} موافق على {spot}، وحصلتما على: {title}! الرمز في المحادثة.",
     },
     # Admins only.
+    "business_message": {
+        "en": "📩 New message from {name}{business}",
+        "fr": "📩 Nouveau message de {name}{business}",
+        "zh": "📩 来自 {name}{business} 的新消息",
+        "ar": "📩 رسالة جديدة من {name}{business}",
+    },
     "partner_request": {
         "en": "🏪 New partner request: {name} - {title}",
         "fr": "🏪 Nouvelle demande de partenariat : {name} - {title}",
@@ -283,6 +289,23 @@ def notify_partner_request(db: Session, background_tasks: BackgroundTasks, reque
             "priority": "high",
         }
         for token, language in targets.items()
+    ])
+
+
+def notify_business_message(db: Session, background_tasks: BackgroundTasks, message):
+    """"📩 New message from Nadia - Café Lune" to the admins."""
+    business = f" - {message.business}" if message.business else ""
+    _queue(background_tasks, [
+        {
+            "to": token,
+            "title": "Blossom",
+            "body": TEXTS["business_message"][normalize_language(language)].format(name=message.name, business=business),
+            "data": {"type": "business_message", "messageId": message.id},
+            "sound": "default",
+            "channelId": "default",
+            "priority": "high",
+        }
+        for token, language in _admin_targets(db).items()
     ])
 
 

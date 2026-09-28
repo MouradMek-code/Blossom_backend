@@ -13,6 +13,7 @@ import html
 import os
 import re
 import secrets
+from collections import defaultdict
 from datetime import datetime, timedelta
 
 from fastapi import BackgroundTasks, HTTPException
@@ -20,7 +21,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from database import db_offers, db_push, mailer
-from database.models import DbDateSpot, DbPartnerRequest, DbSpotOffer, DbVenue
+from database.models import DbBusinessMessage, DbDateSpot, DbPartnerRequest, DbSpotOffer, DbVenue
 
 SITE_URL = os.getenv("SITE_URL", "https://blossom-date.com").rstrip("/")
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -435,3 +436,118 @@ def _refused_email(request: DbPartnerRequest):
     reason = f" {_e(request.refuse_reason)}" if request.refuse_reason else ""
     values = dict(venue=_e(request.venue_name), reason=reason, form=form, form_short=_short(form))
     return subject, mailer.card(title, [p.format(**values) for p in paragraphs])
+
+
+# ---- "Lost my manager link" -------------------------------------------------------
+
+LINK_EMAILS_PER_HOUR = 3
+_link_requests = defaultdict(list)  # email -> times (per server process)
+
+LINK_EMAIL = {
+    "en": ("Your Blossom manager link", "Your manager page",
+           ["Here is the private link to manage <b>{venue}</b> on Blossom: pause or renew your offer, add places and see how many couples came.",
+            "Keep it private. If someone else got it, ask Blossom for a new one."], "Open my manager page"),
+    "fr": ("Votre lien de gestion Blossom", "Votre page de gestion",
+           ["Voici le lien privé pour gérer <b>{venue}</b> sur Blossom : mettez votre offre en pause ou renouvelez-la, ajoutez des places et voyez combien de couples sont venus.",
+            "Gardez-le privé. Si quelqu'un d'autre l'a eu, demandez-en un nouveau à Blossom."], "Ouvrir ma page de gestion"),
+    "zh": ("你的 Blossom 管理链接", "你的管理页面",
+           ["这是在 Blossom 上管理 <b>{venue}</b> 的私人链接：暂停或续期优惠、增加名额、查看有多少对情侣到店。",
+            "请勿外传。如果被别人拿到，请联系 Blossom 更换新链接。"], "打开我的管理页面"),
+    "ar": ("رابط الإدارة الخاص بك على Blossom", "صفحة الإدارة الخاصة بك",
+           ["هذا هو الرابط الخاص لإدارة <b>{venue}</b> على Blossom: أوقف عرضك أو جدّده، أضف أماكن، وشاهد عدد الأزواج الذين جاؤوا.",
+            "احتفظ به سرًا. إن حصل عليه شخص آخر، اطلب رابطًا جديدًا من Blossom."], "فتح صفحة الإدارة"),
+}
+
+
+def send_manager_links(db: Session, background_tasks: BackgroundTasks, email: str, now: datetime = None):
+    """Email the manager link(s) of the venues registered with this address.
+    Always the same answer, so nobody can find out which emails are partners."""
+    now = now or datetime.utcnow()
+    email = _text(email, 200) or ""
+    key = email.lower()
+    recent = [t for t in _link_requests.get(key, []) if t > now - timedelta(hours=1)]
+    _link_requests[key] = recent
+    if EMAIL_RE.match(email) and len(recent) < LINK_EMAILS_PER_HOUR:
+        recent.append(now)
+        venues = db.query(DbVenue).filter(func.lower(DbVenue.contact_email) == key).all()
+        for venue in venues:
+            subject, title, paragraphs, button = LINK_EMAIL[_lang(venue.language)]
+            body = [p.format(venue=_e(venue.name)) for p in paragraphs]
+            background_tasks.add_task(mailer.send_email, venue.contact_email, subject,
+                                      mailer.card(title, body, (button, manage_url(venue))))
+    return {"ok": True}
+
+
+# ---- "Contact us" for businesses ------------------------------------------------
+
+TOPICS = ("partnership", "question", "problem", "other")
+ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", mailer.SENDER["email"])
+MESSAGES_PER_DAY = 5
+
+
+def create_business_message(db: Session, background_tasks: BackgroundTasks, data: dict, now: datetime = None):
+    now = now or datetime.utcnow()
+    name = _text(data.get("name"), 120)
+    email = _text(data.get("email"), 200)
+    message = _long_text(data.get("message"), 3000)
+    topic = data.get("topic") if data.get("topic") in TOPICS else "other"
+    if not name or len(name) < 2:
+        raise HTTPException(status_code=400, detail="Enter your name.")
+    if not email or not EMAIL_RE.match(email):
+        raise HTTPException(status_code=400, detail="Enter a valid email address, so we can answer you.")
+    if not message or len(message) < 5:
+        raise HTTPException(status_code=400, detail="Write your message.")
+    sent_today = db.query(func.count(DbBusinessMessage.id)).filter(
+        func.lower(DbBusinessMessage.email) == email.lower(),
+        DbBusinessMessage.created_at > now - timedelta(days=1),
+    ).scalar()
+    if sent_today >= MESSAGES_PER_DAY:
+        raise HTTPException(status_code=429, detail="We already have your messages - we'll answer soon.")
+
+    row = DbBusinessMessage(
+        created_at=now, name=name, business=_text(data.get("business"), 150), email=email,
+        phone=_text(data.get("phone"), 40), topic=topic, message=message,
+        language=_lang(data.get("language")), handled=False,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    db_push.notify_business_message(db, background_tasks, row)
+    details = "".join(
+        f"<b>{label}:</b> {_e(value)}<br>" for label, value in (
+            ("Name", row.name), ("Business", row.business), ("Email", row.email),
+            ("Phone", row.phone), ("Topic", row.topic),
+        ) if value
+    )
+    body = [details, _e(row.message).replace(chr(10), "<br>"), "Reply to this email to answer them."]
+    background_tasks.add_task(
+        mailer.send_email, ADMIN_EMAIL, f"📩 Blossom business message from {row.name}",
+        mailer.card("New business message", body), {"email": row.email, "name": row.name},
+    )
+    return {"id": row.id, "ok": True}
+
+
+def business_message_view(row: DbBusinessMessage):
+    return {
+        "id": row.id, "created_at": row.created_at, "name": row.name, "business": row.business,
+        "email": row.email, "phone": row.phone, "topic": row.topic, "message": row.message,
+        "language": row.language, "handled": row.handled,
+    }
+
+
+def list_business_messages(db: Session):
+    rows = (
+        db.query(DbBusinessMessage)
+        .order_by(DbBusinessMessage.handled, DbBusinessMessage.created_at.desc())
+        .limit(60).all()
+    )
+    return [business_message_view(r) for r in rows]
+
+
+def set_handled(db: Session, message_id: int, handled: bool):
+    row = db.get(DbBusinessMessage, message_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Message not found.")
+    row.handled = bool(handled)
+    db.commit()
+    return business_message_view(row)

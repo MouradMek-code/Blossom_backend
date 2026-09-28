@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -136,16 +136,23 @@ def redeem(voucher_id: int, payload: RedeemIn, db: Session = Depends(get_db),
 
 # ---- the venue (no account: the staff code is the key) ---------------------------
 
+def _device(request: Request) -> str:
+    """Who is trying, for the wrong-tries limit: the first address in
+    X-Forwarded-For (Render's proxy), else the direct one."""
+    forwarded = request.headers.get("x-forwarded-for", "")
+    return forwarded.split(",")[0].strip() or (request.client.host if request.client else "")
+
+
 @router.post("/venue/check")
-def venue_check(payload: VenueCodeIn, db: Session = Depends(get_db)):
+def venue_check(payload: VenueCodeIn, request: Request, db: Session = Depends(get_db)):
     """blossom-date.com/venue: staff type the couple's code and their staff
     code on their own phone or till - is it valid?"""
-    return db_offers.venue_check(db, payload.code, payload.staff_code)
+    return db_offers.venue_check(db, payload.code, payload.staff_code, _device(request))
 
 
 @router.post("/venue/redeem")
-def venue_redeem(payload: VenueCodeIn, db: Session = Depends(get_db)):
-    return db_offers.venue_redeem(db, payload.code, payload.staff_code)
+def venue_redeem(payload: VenueCodeIn, request: Request, db: Session = Depends(get_db)):
+    return db_offers.venue_redeem(db, payload.code, payload.staff_code, _device(request))
 
 
 @router.get("/{offer_id}/poster")

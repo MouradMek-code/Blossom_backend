@@ -617,3 +617,20 @@ class DbPartnerRequest(Base):
     refuse_reason = Column(Text, nullable=True)
     offer_id = Column(Integer, ForeignKey("spot_offers.id", ondelete="SET NULL"), nullable=True)
     venue = relationship("DbVenue")
+
+
+class DbBusinessMessage(Base):
+    """"Contact us" from blossom-date.com/business: a café, restaurant or any
+    business writing to Blossom. Admins read them in Admin and answer by
+    email."""
+    __tablename__ = "business_messages"
+    id = Column(Integer, primary_key=True)
+    created_at = Column(DateTime, nullable=False, index=True)
+    name = Column(String(120), nullable=False)
+    business = Column(String(150), nullable=True)
+    email = Column(String(200), nullable=False)
+    phone = Column(String(40), nullable=True)
+    topic = Column(String(20), nullable=False)  # partnership | question | problem | other
+    message = Column(Text, nullable=False)
+    language = Column(String(8), nullable=True)
+    handled = Column(Boolean, nullable=False, default=False, server_default="false")

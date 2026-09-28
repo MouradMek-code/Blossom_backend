@@ -73,6 +73,26 @@ class RefuseIn(BaseModel):
     reason: Optional[str] = Field(default=None, max_length=500)
 
 
+class ManagerLinkIn(BaseModel):
+    email: str = Field(max_length=200)
+    website: Optional[str] = None  # hidden field: bots fill it
+
+
+class ContactIn(BaseModel):
+    name: str = Field(max_length=120)
+    business: Optional[str] = Field(default=None, max_length=150)
+    email: str = Field(max_length=200)
+    phone: Optional[str] = Field(default=None, max_length=40)
+    topic: str = Field(default="other", max_length=20)
+    message: str = Field(max_length=3000)
+    language: Optional[str] = Field(default=None, max_length=8)
+    website: Optional[str] = None  # hidden field: bots fill it
+
+
+class HandledIn(BaseModel):
+    handled: bool = True
+
+
 class ManagerOfferUpdate(BaseModel):
     active: Optional[bool] = None
     max_couples: Optional[int] = None
@@ -158,3 +178,35 @@ def manage_new_offer(token: str, payload: NewOfferIn, background_tasks: Backgrou
     data = payload.model_dump()
     data["ends_at"] = _utc(data.get("ends_at"))
     return db_partners.create_request(db, background_tasks, data, venue=venue)
+
+
+# ---- businesses: lost link, contact us --------------------------------------------
+
+@router.post("/manager_link")
+def lost_manager_link(payload: ManagerLinkIn, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """"Lost your manager link?": emailed again to the venue's address. Same
+    answer whatever the email, so partners can't be looked up."""
+    if payload.website:
+        return {"ok": True}
+    return db_partners.send_manager_links(db, background_tasks, payload.email)
+
+
+@router.post("/contact")
+def contact(payload: ContactIn, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """blossom-date.com/business - "Contact us" for businesses."""
+    if payload.website:
+        return {"id": None, "ok": True}
+    return db_partners.create_business_message(db, background_tasks, payload.model_dump())
+
+
+@router.get("/contact")
+def business_messages(db: Session = Depends(get_db), user: UserAuth = Depends(get_current_user)):
+    _require_admin(user)
+    return db_partners.list_business_messages(db)
+
+
+@router.post("/contact/{message_id}/handled")
+def mark_handled(message_id: int, payload: HandledIn, db: Session = Depends(get_db),
+                 user: UserAuth = Depends(get_current_user)):
+    _require_admin(user)
+    return db_partners.set_handled(db, message_id, payload.handled)
