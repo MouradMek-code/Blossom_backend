@@ -37,6 +37,11 @@ def _clean(value, length):
 
 
 MAX_PAGES_PER_VISIT = 300
+# Page-by-page details are kept one week, then deleted (delete_old_pages):
+# the table would otherwise grow forever. Visits themselves stay - the
+# 7/30/90-day charts need them, and an older day still shows each visit with
+# the page it started on.
+PAGES_KEPT = timedelta(days=7)
 # A long random segment in a path is a secret (a friend's activation link, a
 # venue's manager link): never stored as such.
 SECRET_SEGMENT = re.compile(r"/[A-Za-z0-9_-]{16,}(?=/|$)")
@@ -52,6 +57,14 @@ def clean_path(value):
     path = SECRET_SEGMENT.sub("/:token", path)
     path = NUMBER_SEGMENT.sub("/:id", path)
     return path[:120] or None
+
+
+def delete_old_pages(db: Session, now: datetime = None) -> int:
+    """Delete the pages seen more than a week ago. Returns how many."""
+    now = now or datetime.utcnow()
+    deleted = db.query(DbVisitPage).filter(DbVisitPage.at < now - PAGES_KEPT).delete(synchronize_session=False)
+    db.commit()
+    return deleted
 
 
 def _add_page(db: Session, visit: DbVisit, path, now: datetime):

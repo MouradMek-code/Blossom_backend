@@ -193,6 +193,12 @@ HOT_PATH_INDEXES = [
     ("match", "profile2_id"),
     ("message", "conversation_id"),
     ("profile_block", "blocked_profile_id"),
+    # The dashboard's day view reads one day of these; the weekly clean-up
+    # deletes old pages by date.
+    ("message", "created_at"),
+    ("profile_like", "created_at"),
+    ("match", "matched_at"),
+    ("visit_pages", "at"),
 ]
 with engine.connect() as connection:
     existing_indexes = set(connection.execute(text(
@@ -218,29 +224,37 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# "⏰ Your -20% at Café Lune ends in 5 h": every 10 minutes, remind couples
-# whose promotion code is about to expire (once per code - see
-# db_push.send_voucher_reminders). A background thread keeps it simple; while
-# the server sleeps, reminders simply wait until it wakes up.
+# Background jobs, every 10 minutes:
+#  * "⏰ Your -20% at Café Lune ends in 5 h": remind couples whose promotion
+#    code is about to expire (once per code - see db_push.send_voucher_reminders);
+#  * delete the dashboard's page-by-page details older than a week
+#    (db_analytics.delete_old_pages).
+# A background thread keeps it simple; while the server sleeps, the jobs
+# simply wait until it wakes up.
 import logging  # noqa: E402
 import threading  # noqa: E402
 import time  # noqa: E402
 
 from database.database import SessionLocal  # noqa: E402
-from database import db_push  # noqa: E402
+from database import db_analytics, db_push  # noqa: E402
 
 VOUCHER_REMINDERS_EVERY = 600  # seconds
 
 
+def _run_job(name, job):
+    db = SessionLocal()
+    try:
+        job(db)
+    except Exception as exc:  # never let the loop die
+        logging.getLogger(__name__).warning("%s failed: %s", name, exc)
+    finally:
+        db.close()
+
+
 def _voucher_reminder_loop():
     while True:
-        db = SessionLocal()
-        try:
-            db_push.send_voucher_reminders(db)
-        except Exception as exc:  # never let the loop die
-            logging.getLogger(__name__).warning("Voucher reminders failed: %s", exc)
-        finally:
-            db.close()
+        _run_job("Voucher reminders", db_push.send_voucher_reminders)
+        _run_job("Old dashboard pages clean-up", db_analytics.delete_old_pages)
         time.sleep(VOUCHER_REMINDERS_EVERY)
 
 
