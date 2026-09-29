@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
@@ -64,3 +65,17 @@ def get_dashboard(
     if not getattr(current_user, "is_admin", False):
         raise HTTPException(status_code=403, detail="Admin access required")
     return db_analytics.dashboard(db, days, tz_offset)
+
+
+@router.get("/day")
+def get_day(
+    day: Optional[date] = Query(None, description="YYYY-MM-DD in the admin's time zone; today when empty"),
+    tz_offset: int = Query(0, description="Minutes ahead of UTC, e.g. 120 for Paris in summer"),
+    db: Session = Depends(get_db),
+    current_user: UserAuth = Depends(get_current_user),
+):
+    """Admins only: one day in detail - each person, the pages they saw and
+    what members did (counts only)."""
+    if not getattr(current_user, "is_admin", False):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return db_analytics.day_detail(db, day, tz_offset)

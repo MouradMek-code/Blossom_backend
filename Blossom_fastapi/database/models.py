@@ -519,6 +519,17 @@ class DbVisit(Base):
     timezone = Column(String(64), nullable=True)
 
 
+class DbVisitPage(Base):
+    """A page (website) or screen (app) seen during a visit, in order - the
+    dashboard's day view shows what each person did. Secret links (a friend's
+    activation link, a venue's manager link) are stored masked."""
+    __tablename__ = "visit_pages"
+    id = Column(Integer, primary_key=True)
+    visit_id = Column(Integer, ForeignKey("visits.id", ondelete="CASCADE"), nullable=False, index=True)
+    at = Column(DateTime, nullable=False)  # UTC
+    path = Column(String(120), nullable=False)
+
+
 class DbAdminDevice(Base):
     """Phones and browsers an admin has used: never counted as visitors, even
     logged out."""

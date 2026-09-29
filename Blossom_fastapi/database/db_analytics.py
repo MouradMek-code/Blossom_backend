@@ -14,12 +14,15 @@ during a visit, that visit becomes theirs instead of counting twice.
 """
 import re
 from collections import Counter, defaultdict
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
-from database.models import DbAdminDevice, DbProfile, DbUser, DbVisit
+from database.models import (
+    DbAdminDevice, DbDateSpot, DbMatch, DbMessage, DbProfile, DbProfileLike, DbReport, DbSpotVoucher,
+    DbUser, DbVisit, DbVisitPage,
+)
 
 SESSION = timedelta(minutes=30)
 PLATFORMS = ("app", "web")
@@ -31,6 +34,44 @@ BOTS = re.compile(r"bot|crawl|spider|slurp|preview|lighthouse|headless|facebooke
 def _clean(value, length):
     value = " ".join(str(value or "").split())
     return value[:length] or None
+
+
+MAX_PAGES_PER_VISIT = 300
+# A long random segment in a path is a secret (a friend's activation link, a
+# venue's manager link): never stored as such.
+SECRET_SEGMENT = re.compile(r"/[A-Za-z0-9_-]{16,}(?=/|$)")
+NUMBER_SEGMENT = re.compile(r"/\d+(?=/|$)")
+
+
+def clean_path(value):
+    """"/claim/Xk3...9" -> "/claim/:token", "/profile/42" -> "/profile/:id"."""
+    path = _clean(value, 200)
+    if not path:
+        return None
+    path = path.split("?")[0].split("#")[0]
+    path = SECRET_SEGMENT.sub("/:token", path)
+    path = NUMBER_SEGMENT.sub("/:id", path)
+    return path[:120] or None
+
+
+def _add_page(db: Session, visit: DbVisit, path, now: datetime):
+    """Note the page seen - not again when it's the one already noted (a
+    reload, the app coming back, a keep-alive)."""
+    path = clean_path(path)
+    if not path or visit.id is None:
+        return
+    last = (
+        db.query(DbVisitPage.path)
+        .filter(DbVisitPage.visit_id == visit.id)
+        .order_by(DbVisitPage.at.desc(), DbVisitPage.id.desc())
+        .first()
+    )
+    if last and last[0] == path:
+        return
+    count = db.query(func.count(DbVisitPage.id)).filter(DbVisitPage.visit_id == visit.id).scalar() or 0
+    if count >= MAX_PAGES_PER_VISIT:
+        return
+    db.add(DbVisitPage(visit_id=visit.id, at=now, path=path))
 
 
 def record_visit(db: Session, user, device_id: str, platform: str, entry=None, language=None,
@@ -71,6 +112,7 @@ def record_visit(db: Session, user, device_id: str, platform: str, entry=None, l
     )
     if current:
         current.last_seen_at = now
+        _add_page(db, current, entry, now)
         db.commit()
         return {"counted": False, "reason": "same visit"}
 
@@ -86,20 +128,24 @@ def record_visit(db: Session, user, device_id: str, platform: str, entry=None, l
             before_login.visitor = visitor
             before_login.profile_id = profile_id
             before_login.last_seen_at = now
+            _add_page(db, before_login, entry, now)
             db.commit()
             return {"counted": True, "reason": "logged in during the visit"}
 
-    db.add(DbVisit(
+    visit = DbVisit(
         created_at=now,
         last_seen_at=now,
         visitor=visitor,
         profile_id=profile_id,
         device_id=device_id,
         platform=platform,
-        entry=_clean(entry, 120),
+        entry=clean_path(entry),
         language=(_clean(language, 8) or "").lower()[:2] or None,
         timezone=_clean(timezone, 64),
-    ))
+    )
+    db.add(visit)
+    db.flush()
+    _add_page(db, visit, entry, now)
     db.commit()
     return {"counted": True, "reason": "new visit"}
 
@@ -268,4 +314,203 @@ def dashboard(db: Session, days: int = 30, tz_offset_minutes: int = 0, now: date
             "returning": sum(1 for days_seen in member_days.values() if len(days_seen) >= 2),
             "visits_per_member": round(sum(member_visits.values()) / len(member_visits), 1) if member_visits else 0,
         },
+    }
+
+
+# ---- one day in detail ------------------------------------------------------------
+
+MAX_PEOPLE = 300
+
+
+def _iso(value):
+    return value.isoformat(timespec="seconds") + "Z" if value else None
+
+
+def _counts(rows):
+    """[(profile_id, n), ...] -> {profile_id: n}"""
+    return {pid: n for pid, n in rows if pid is not None}
+
+
+def _pair_counts(db: Session, column_time, first, second, start, end):
+    """Both people of a match / a couple's gift code count it."""
+    result = Counter()
+    for a, b in db.query(first, second).filter(column_time >= start, column_time < end).all():
+        result[a] += 1
+        result[b] += 1
+    return result
+
+
+def _member_actions(db: Session, start: datetime, end: datetime) -> dict:
+    """What each member did that day - counts only: never message contents,
+    nor whom they liked or wrote to."""
+    actions = defaultdict(dict)
+
+    def put(name, counts):
+        for pid, n in counts.items():
+            if pid and n:
+                actions[pid][name] = n
+
+    put("likes", _counts(
+        db.query(DbProfileLike.liker_profile_id, func.count(DbProfileLike.id))
+        .filter(DbProfileLike.created_at >= start, DbProfileLike.created_at < end)
+        .group_by(DbProfileLike.liker_profile_id).all()))
+    put("matches", _pair_counts(db, DbMatch.matched_at, DbMatch.profile1_id, DbMatch.profile2_id, start, end))
+    put("messages", _counts(
+        db.query(DbMessage.sender_profile_id, func.count(DbMessage.id))
+        .filter(DbMessage.created_at >= start, DbMessage.created_at < end, DbMessage.date_spot_id.is_(None))
+        .group_by(DbMessage.sender_profile_id).all()))
+    put("invites", _counts(
+        db.query(DbMessage.sender_profile_id, func.count(DbMessage.id))
+        .filter(DbMessage.created_at >= start, DbMessage.created_at < end, DbMessage.date_spot_id.isnot(None))
+        .group_by(DbMessage.sender_profile_id).all()))
+    put("spots_shared", _counts(
+        db.query(DbDateSpot.profile_id, func.count(DbDateSpot.id))
+        .filter(DbDateSpot.created_at >= start, DbDateSpot.created_at < end)
+        .group_by(DbDateSpot.profile_id).all()))
+    put("gift_codes", _pair_counts(
+        db, DbSpotVoucher.created_at, DbSpotVoucher.profile1_id, DbSpotVoucher.profile2_id, start, end))
+    put("gifts_used", _pair_counts(
+        db, DbSpotVoucher.used_at, DbSpotVoucher.profile1_id, DbSpotVoucher.profile2_id, start, end))
+    put("reports", _counts(
+        db.query(DbReport.reporter_profile_id, func.count(DbReport.id))
+        .filter(DbReport.created_at >= start, DbReport.created_at < end)
+        .group_by(DbReport.reporter_profile_id).all()))
+
+    for pid, created, completed, signed_up in (
+        db.query(DbProfile.id, DbProfile.created_at, DbProfile.completed_at, DbUser.created_at)
+        .join(DbUser, DbUser.id == DbProfile.user_id)
+        .filter(
+            ((DbProfile.created_at >= start) & (DbProfile.created_at < end))
+            | ((DbProfile.completed_at >= start) & (DbProfile.completed_at < end))
+            | ((DbUser.created_at >= start) & (DbUser.created_at < end))
+        ).all()
+    ):
+        if signed_up and start <= signed_up < end:
+            actions[pid]["signed_up"] = 1
+        if created and start <= created < end:
+            actions[pid]["profile_created"] = 1
+        if completed and start <= completed < end:
+            actions[pid]["profile_finished"] = 1
+    return actions
+
+
+def day_detail(db: Session, day: date = None, tz_offset_minutes: int = 0, now: datetime = None):
+    """Everyone who came on one day (the admin's day), with the pages they saw
+    and, for members, what they did. Admins are left out, as everywhere."""
+    now = now or datetime.utcnow()
+    offset = timedelta(minutes=max(-840, min(840, int(tz_offset_minutes or 0))))
+    day = day or (now + offset).date()
+    start = datetime.combine(day, datetime.min.time()) - offset  # UTC
+    end = start + timedelta(days=1)
+
+    admin_profile_ids = {
+        pid for (pid,) in db.query(DbProfile.id).join(DbUser, DbUser.id == DbProfile.user_id)
+        .filter(DbUser.is_admin == True).all()  # noqa: E712
+    }
+    visits = [
+        v for v in db.query(DbVisit).filter(DbVisit.created_at >= start, DbVisit.created_at < end)
+        .order_by(DbVisit.created_at).all()
+        if v.profile_id not in admin_profile_ids
+    ]
+    pages = defaultdict(list)
+    if visits:
+        for page in (
+            db.query(DbVisitPage).filter(DbVisitPage.visit_id.in_([v.id for v in visits]))
+            .order_by(DbVisitPage.at, DbVisitPage.id).all()
+        ):
+            pages[page.visit_id].append({"path": page.path, "at": _iso(page.at)})
+
+    # Visitors' phones/browsers already seen before this day.
+    devices = {v.device_id for v in visits if not v.profile_id and v.device_id}
+    seen_before = {
+        d for (d,) in db.query(DbVisit.device_id)
+        .filter(DbVisit.device_id.in_(devices), DbVisit.created_at < start).distinct().all()
+    } if devices else set()
+
+    actions = _member_actions(db, start, end)
+    for pid in admin_profile_ids:
+        actions.pop(pid, None)
+
+    people = {}
+    for v in visits:
+        person = people.setdefault(v.visitor, {
+            "key": v.visitor,
+            "profile_id": v.profile_id,
+            "device": (v.device_id or "")[-4:].upper() or None,
+            "visits": [],
+        })
+        person["visits"].append({
+            "start": _iso(v.created_at),
+            "end": _iso(v.last_seen_at),
+            "seconds": int((v.last_seen_at - v.created_at).total_seconds()),
+            "platform": v.platform,
+            "language": v.language,
+            "timezone": v.timezone,
+            # Visits recorded before pages were: just the page they came in on.
+            "pages": pages.get(v.id) or ([{"path": v.entry, "at": _iso(v.created_at)}] if v.entry else []),
+        })
+    # Members who did something without a recorded visit (older app versions).
+    for pid in actions:
+        people.setdefault(f"p:{pid}", {"key": f"p:{pid}", "profile_id": pid, "device": None, "visits": []})
+
+    profiles = {
+        p.id: p for p in db.query(DbProfile).options(selectinload(DbProfile.photos))
+        .filter(DbProfile.id.in_([p["profile_id"] for p in people.values() if p["profile_id"]])).all()
+    } if people else {}
+
+    result = []
+    for person in people.values():
+        visits_of = person["visits"]
+        pid = person["profile_id"]
+        profile = profiles.get(pid) if pid else None
+        first = min((x["start"] for x in visits_of), default=None)
+        last = max((x["end"] for x in visits_of), default=None)
+        latest = visits_of[-1] if visits_of else {}
+        result.append({
+            "key": person["key"],
+            "member": {
+                "id": profile.id,
+                "first_name": profile.first_name,
+                "age": profile.age,
+                "gender": profile.gender,
+                "city": profile.city,
+                "country": profile.country,
+                "photo": sorted(profile.photos, key=lambda ph: ph.id)[0].image_url if profile.photos else None,
+            } if profile else None,
+            "device": person["device"],
+            "returning": (person["device"] is not None and not pid and any(
+                v.device_id in seen_before for v in visits if v.visitor == person["key"])),
+            "first_at": first,
+            "last_at": last,
+            "seconds": sum(x["seconds"] for x in visits_of),
+            "platforms": sorted({x["platform"] for x in visits_of if x["platform"]}),
+            "language": latest.get("language"),
+            "timezone": latest.get("timezone"),
+            "visits": visits_of,
+            "actions": actions.get(pid, {}) if pid else {},
+        })
+    result.sort(key=lambda p: p["last_at"] or "", reverse=True)
+
+    hours = [0] * 24
+    for v in visits:
+        hours[(v.created_at + offset).hour] += 1
+    members = [p for p in result if p["member"]]
+    return {
+        "date": day.isoformat(),
+        "tz_offset_minutes": int(offset.total_seconds() // 60),
+        "totals": {
+            "people": len(result),
+            "members": len(members),
+            "visitors": len(result) - len(members),
+            "visits": len(visits),
+            "app": sum(1 for v in visits if v.platform == "app"),
+            "web": sum(1 for v in visits if v.platform == "web"),
+            "pages": sum(len(v["pages"]) for p in result for v in p["visits"]),
+            "new_accounts": sum(1 for p in members if p["actions"].get("signed_up")),
+            "new_profiles": sum(1 for p in members if p["actions"].get("profile_finished")),
+            "seconds": sum(p["seconds"] for p in result),
+        },
+        "hours": hours,
+        "people": result[:MAX_PEOPLE],
+        "truncated": len(result) > MAX_PEOPLE,
     }
