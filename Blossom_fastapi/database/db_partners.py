@@ -90,7 +90,7 @@ def search_spots(db: Session, query: str, limit: int = 8) -> list:
     if not words or len("".join(words)) < 2:
         return []
     found = []
-    for spot in db.query(DbDateSpot).order_by(DbDateSpot.name).all():
+    for spot in db.query(DbDateSpot).filter(DbDateSpot.status == "published").order_by(DbDateSpot.name).all():
         name = _fold(spot.name)
         haystack = f"{name} {_fold(spot.neighborhood)} {_fold(spot.city)}"
         if all(w in haystack for w in words):
@@ -104,7 +104,7 @@ def search_spots(db: Session, query: str, limit: int = 8) -> list:
 
 def spot_for_form(db: Session, spot_id: int) -> dict:
     spot = db.get(DbDateSpot, spot_id)
-    if not spot:
+    if not spot or spot.status != "published":
         raise HTTPException(status_code=404, detail="This place isn't on Blossom anymore.")
     partner = db.query(DbVenue.id).filter(DbVenue.spot_id == spot.id).first() is not None
     return _spot_brief(spot, partner)
@@ -313,6 +313,8 @@ def approve(db: Session, background_tasks: BackgroundTasks, request_id: int, cha
             db.flush()
         venue = db.query(DbVenue).filter(DbVenue.spot_id == spot.id).first() or _new_venue(db, spot, request, now)
 
+    # A place a member suggested and nobody approved yet: the gift makes it public.
+    spot.status = "published"
     offer = db_offers.create_offer(
         db, spot.id, title, request.offer_details, request.max_couples, ends_at, valid_hours,
         staff_code=venue.staff_code, now=now,

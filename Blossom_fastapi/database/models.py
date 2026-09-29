@@ -467,6 +467,13 @@ class DbDateSpot(Base):
         default=datetime.utcnow
     )
 
+    # A member's place is a suggestion ("pending") until an admin approves it;
+    # only "published" spots are listed. Admins' own spots are published at once.
+    status = Column(String(12), nullable=False, default="published", server_default="published", index=True)
+    # The member would love this place to offer a gift to couples - a lead
+    # for the admins to contact the venue.
+    wants_gift = Column(Boolean, nullable=False, default=False, server_default="false")
+
 
 class DbPushToken(Base):
     """An Expo push token for one phone, so the backend can notify it (new

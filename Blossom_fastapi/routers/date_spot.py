@@ -297,8 +297,10 @@ def list_date_spots(
     best_for: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
-    """Public listing so the city pages are browsable (and indexable)."""
-    query = db.query(DbDateSpot).options(selectinload(DbDateSpot.profile))
+    """Public listing so the city pages are browsable (and indexable).
+    Only published spots - members' suggestions wait for an admin."""
+    query = db.query(DbDateSpot).options(selectinload(DbDateSpot.profile)).filter(
+        DbDateSpot.status == "published")
     if country:
         query = query.filter(DbDateSpot.country == country)
     if city:
@@ -323,13 +325,16 @@ def list_date_spots(
         spot.offer = offers.get(spot.id)
         # Partner spots: only admins get Edit / Delete (see _require_manage).
         spot.partner = spot.id in partners
+    # The places with a gift for couples first (the featured card is one of
+    # them); within each group, the order above.
+    spots.sort(key=lambda spot: spot.offer is None)
     return spots
 
 
 @router.get("/locations")
 def list_locations(db: Session = Depends(get_db)):
     """Countries (with their cities) that actually have spots, for the filters."""
-    rows = db.query(DbDateSpot.country, DbDateSpot.city).distinct().all()
+    rows = db.query(DbDateSpot.country, DbDateSpot.city).filter(DbDateSpot.status == "published").distinct().all()
     grouped = {}
     for country, city in rows:
         grouped.setdefault(country, set()).add(city)
@@ -475,6 +480,8 @@ def invite_to_date_spot(
     woman writes first in a man/woman match still apply.
     """
     spot = _get_spot(db, spot_id)
+    if spot.status != "published":
+        raise HTTPException(status_code=404, detail="That place no longer exists.")
 
     profile = db.query(DbProfile).filter(DbProfile.user_id == current_user.id).first()
     if not profile:
@@ -536,6 +543,9 @@ def create_date_spot(
     price: Optional[str] = Form(None),
     best_for: Optional[str] = Form(None),
     image: Optional[UploadFile] = File(None),
+    # "I'd love this place to offer a gift to couples" (members' suggestions).
+    wants_gift: Optional[bool] = Form(False),
+    background_tasks: BackgroundTasks = None,
     db: Session = Depends(get_db),
     current_user: UserAuth = Depends(get_current_user),
 ):
@@ -583,10 +593,15 @@ def create_date_spot(
         price=spot_price,
         best_for=spot_best_for,
         profile_id=profile.id,
+        # A member's place is a suggestion until an admin approves it.
+        status="published" if getattr(current_user, "is_admin", False) else "pending",
+        wants_gift=bool(wants_gift),
     )
     db.add(spot)
     db.commit()
     db.refresh(spot)
+    if spot.status == "pending" and background_tasks is not None:
+        db_push.notify_spot_suggestion(db, background_tasks, spot, profile.first_name)
     return spot
 
 
@@ -664,6 +679,37 @@ def replace_date_spot_image(
         except Exception:
             # The new photo is already saved; a leftover old file is harmless.
             pass
+    return _with_partner(db, spot)
+
+
+@router.get("/admin/suggestions", response_model=List[DateSpotDisplay])
+def list_suggestions(db: Session = Depends(get_db), current_user: UserAuth = Depends(get_current_user)):
+    """Admin: places members suggested, oldest first. Approve publishes one;
+    refusing deletes it (DELETE /{spot_id})."""
+    _require_admin(current_user)
+    return (
+        db.query(DbDateSpot).options(selectinload(DbDateSpot.profile))
+        .filter(DbDateSpot.status == "pending")
+        .order_by(DbDateSpot.created_at)
+        .all()
+    )
+
+
+@router.post("/{spot_id}/approve", response_model=DateSpotDisplay)
+def approve_suggestion(
+    spot_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: UserAuth = Depends(get_current_user),
+):
+    """Admin: publish a member's suggestion (they get a "thank you" push)."""
+    _require_admin(current_user)
+    spot = _get_spot(db, spot_id)
+    if spot.status != "published":
+        spot.status = "published"
+        db.commit()
+        db.refresh(spot)
+        db_push.notify_spot_approved(db, background_tasks, spot)
     return _with_partner(db, spot)
 
 

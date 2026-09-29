@@ -523,6 +523,9 @@ class DateSpotDisplay(BaseModel):
     offer: Optional[OfferPublic] = None
     # A Blossom partner (venue or gifts): only admins may edit or delete it.
     partner: bool = False
+    # "published", or "pending" for a member's suggestion waiting for an admin.
+    status: Optional[str] = "published"
+    wants_gift: bool = False
 
     # Stored as "First date,Casual"; clients get a proper list.
     @field_validator("best_for", mode="before")

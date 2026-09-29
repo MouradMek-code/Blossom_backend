@@ -120,6 +120,16 @@ with engine.begin() as connection:
     connection.execute(text(
         "ALTER TABLE spot_vouchers ADD COLUMN IF NOT EXISTS reminded_at TIMESTAMP"
     ))
+    # Members' places wait for an admin's approval (see date_spots.status).
+    connection.execute(text(
+        "ALTER TABLE date_spots ADD COLUMN IF NOT EXISTS status VARCHAR(12) NOT NULL DEFAULT 'published'"
+    ))
+    connection.execute(text(
+        "ALTER TABLE date_spots ADD COLUMN IF NOT EXISTS wants_gift BOOLEAN NOT NULL DEFAULT false"
+    ))
+    connection.execute(text(
+        "CREATE INDEX IF NOT EXISTS ix_date_spots_status ON date_spots (status)"
+    ))
     # A partner request for a place already on Blossom (the spot it picked).
     connection.execute(text(
         "ALTER TABLE partner_requests ADD COLUMN IF NOT EXISTS spot_id INTEGER "

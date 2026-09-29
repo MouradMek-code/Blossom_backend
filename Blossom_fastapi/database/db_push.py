@@ -80,6 +80,18 @@ TEXTS = {
         "zh": "📩 来自 {name}{business} 的新消息",
         "ar": "📩 رسالة جديدة من {name}{business}",
     },
+    "spot_suggestion": {
+        "en": "📍 New place suggested by {author}: {name} ({city})",
+        "fr": "📍 Nouveau lieu suggéré par {author} : {name} ({city})",
+        "zh": "📍 {author} 推荐了新地点：{name}（{city}）",
+        "ar": "📍 مكان جديد اقترحه {author}: {name} ({city})",
+    },
+    "spot_approved": {
+        "en": "🎉 Your place {name} is now on Blossom - thank you!",
+        "fr": "🎉 Votre lieu {name} est maintenant sur Blossom - merci !",
+        "zh": "🎉 你推荐的地点 {name} 已上线 Blossom，谢谢！",
+        "ar": "🎉 مكانك {name} أصبح الآن على Blossom - شكرًا لك!",
+    },
     "partner_request": {
         "en": "🏪 New partner request: {name} - {title}",
         "fr": "🏪 Nouvelle demande de partenariat : {name} - {title}",
@@ -289,6 +301,45 @@ def notify_partner_request(db: Session, background_tasks: BackgroundTasks, reque
             "priority": "high",
         }
         for token, language in targets.items()
+    ])
+
+
+def notify_spot_suggestion(db: Session, background_tasks: BackgroundTasks, spot, author_name: str):
+    """"📍 New place suggested by Sara: Café Rose (Paris)" to the admins."""
+    targets = _admin_targets(db)
+    _queue(background_tasks, [
+        {
+            "to": token,
+            "title": "Blossom",
+            "body": TEXTS["spot_suggestion"][normalize_language(language)].format(
+                author=author_name or "?", name=spot.name, city=spot.city),
+            "data": {"type": "spot_suggestion", "spotId": spot.id},
+            "sound": "default",
+            "channelId": "default",
+            "priority": "high",
+        }
+        for token, language in targets.items()
+    ])
+
+
+def notify_spot_approved(db: Session, background_tasks: BackgroundTasks, spot):
+    """"🎉 Your place Café Rose is now on Blossom" to the member who suggested it."""
+    if not spot.profile_id:
+        return
+    profile = db.get(DbProfile, spot.profile_id)
+    if not profile:
+        return
+    rows = db.query(DbPushToken.token, DbPushToken.language).filter(DbPushToken.user_id == profile.user_id).all()
+    _queue(background_tasks, [
+        {
+            "to": token,
+            "title": "Blossom",
+            "body": TEXTS["spot_approved"][normalize_language(language)].format(name=spot.name),
+            "data": {"type": "spot", "spotId": spot.id},
+            "sound": "default",
+            "channelId": "default",
+        }
+        for token, language in rows
     ])
 
 
