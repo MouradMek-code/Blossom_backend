@@ -32,12 +32,11 @@ def create_user(request:UserBase,db:Session = Depends(get_db)):
 # Sign-up codes go by email (/user/send_email). The SMS routes
 # (/user/verify, /user/verify-phone) and their Vonage/Infobip keys are gone:
 # nothing called them any more.
-@router.get('/all', response_model=list[UserDisplay])
-def get_all_users(db:Session = Depends(get_db)):
-    return db_user.get_all_users(db)
-
-# Must stay above GET /{id}: FastAPI matches in declaration order, so if the
-# int path came first "me" would be parsed as an id and 422.
+#
+# GET /user/all and GET /user/{id} are gone too: they needed no login and would
+# have handed anyone every member's email and phone number. Admins list
+# members with GET /user/admin/users; everyone else gets their own account
+# from GET /user/me.
 @router.get('/me')
 def get_me(db: Session = Depends(get_db), current_user: UserAuth = Depends(get_current_user)):
     """Who am I? Lets the clients decide whether to show admin-only or
@@ -96,10 +95,6 @@ def get_badges(db: Session = Depends(get_db), current_user: UserAuth = Depends(g
         "likes": likes_query.scalar() or 0,
         "messages": db_message.count_unread_conversations(db, profile_id),
     }
-
-@router.get('/{id}', response_model=UserDisplay)
-def get_user_by_id(id:int,db:Session = Depends(get_db)):
-    return db_user.get_user_by_id(db,id)
 
 # Accounts are deleted only by their owner (DELETE /user/me) or an admin
 # (DELETE /user/admin/users/{id}). There used to be DELETE /user/{id} and

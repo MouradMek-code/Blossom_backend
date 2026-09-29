@@ -43,17 +43,6 @@ def create_user(db : Session,request:UserBase):
 
     return {"username":new_user.username,"email":new_user.email,"phone_number":new_user.phone_number,"access_token":access_token}
 
-def get_all_users(db:Session):
-
-    return db.query(DbUser).all()
-
-def get_user_by_id(db:Session,id:int):
-
-    db_user = db.query(DbUser).filter(DbUser.id == id).first()
-    if not db_user:
-        raise HTTPException(status_code=404, detail="User not found")
-    return db.query(DbUser).filter(DbUser.id == id).first()
-
 def get_user_by_username(db:Session,username:str):
     user=db.query(DbUser).filter(DbUser.username == username).first()
     if not user:
