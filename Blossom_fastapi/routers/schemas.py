@@ -521,6 +521,8 @@ class DateSpotDisplay(BaseModel):
     profile: Optional[DateSpotAuthor] = None
     # The venue's current promotion for couples, if any.
     offer: Optional[OfferPublic] = None
+    # A Blossom partner (venue or gifts): only admins may edit or delete it.
+    partner: bool = False
 
     # Stored as "First date,Casual"; clients get a proper list.
     @field_validator("best_for", mode="before")

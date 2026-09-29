@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session, selectinload
 from auth.oauth2 import get_current_user
 from database import db_message, db_offers, db_profile, db_push
 from database.database import get_db
-from database.models import DbDateSpot, DbMatch, DbProfile, DbUser
+from database.models import DbDateSpot, DbMatch, DbProfile, DbSpotOffer, DbUser, DbVenue
 from database.starter_spots import STARTER_CITY, STARTER_COUNTRY, STARTER_SPOTS
 from routers.schemas import (
     DateSpotDisplay,
@@ -239,12 +239,38 @@ def _require_admin(current_user: UserAuth):
         raise HTTPException(status_code=403, detail="Admin access required")
 
 
-def _can_manage(db: Session, spot: DbDateSpot, current_user: UserAuth) -> bool:
-    """Authors manage their own spots; admins manage any (moderation, fixes)."""
+def _partner_spot_ids(db: Session, spot_ids) -> set:
+    """Spots that are Blossom partners: a partner venue, or any gift for
+    couples (current or past - couples may still hold its codes)."""
+    spot_ids = list(spot_ids)
+    if not spot_ids:
+        return set()
+    venues = db.query(DbVenue.spot_id).filter(DbVenue.spot_id.in_(spot_ids))
+    offers = db.query(DbSpotOffer.spot_id).filter(DbSpotOffer.spot_id.in_(spot_ids))
+    return {sid for (sid,) in venues} | {sid for (sid,) in offers}
+
+
+def _with_partner(db: Session, spot: DbDateSpot) -> DbDateSpot:
+    """One spot sent back after a change: say whether it's a partner, like the list."""
+    spot.partner = bool(_partner_spot_ids(db, [spot.id]))
+    return spot
+
+
+def _require_manage(db: Session, spot: DbDateSpot, current_user: UserAuth, not_yours: str):
+    """Admins manage any spot (moderation, fixes). Members manage the spots
+    they shared - until the spot becomes a partner: then its venue, its gifts
+    and the codes couples got there depend on it, so only admins may change it."""
     if getattr(current_user, "is_admin", False):
-        return True
+        return
     profile = db.query(DbProfile).filter(DbProfile.user_id == current_user.id).first()
-    return profile is not None and spot.profile_id == profile.id
+    if profile is None or spot.profile_id != profile.id:
+        raise HTTPException(status_code=403, detail=not_yours)
+    if _partner_spot_ids(db, [spot.id]):
+        raise HTTPException(
+            status_code=403,
+            detail="This place is a Blossom partner now, so only the Blossom team can change it. "
+                   "Write to us if something needs fixing.",
+        )
 
 
 def _get_spot(db: Session, spot_id: int) -> DbDateSpot:
@@ -292,8 +318,11 @@ def list_date_spots(
     ).all()
     # The venues' promotions for couples, shown to everyone (visitors too).
     offers = db_offers.public_offers(db, [spot.id for spot in spots])
+    partners = _partner_spot_ids(db, [spot.id for spot in spots])
     for spot in spots:
         spot.offer = offers.get(spot.id)
+        # Partner spots: only admins get Edit / Delete (see _require_manage).
+        spot.partner = spot.id in partners
     return spots
 
 
@@ -429,7 +458,7 @@ def set_date_spot_stats(
 
     db.commit()
     db.refresh(spot)
-    return spot
+    return _with_partner(db, spot)
 
 
 @router.post("/{spot_id}/invite", response_model=DateSpotInviteResult)
@@ -576,8 +605,7 @@ def update_date_spot(
     replaced separately via PUT /{spot_id}/image.
     """
     spot = _get_spot(db, spot_id)
-    if not _can_manage(db, spot, current_user):
-        raise HTTPException(status_code=403, detail="You can only edit places you added.")
+    _require_manage(db, spot, current_user, "You can only edit places you added.")
 
     sent = payload.model_fields_set
 
@@ -611,7 +639,7 @@ def update_date_spot(
 
     db.commit()
     db.refresh(spot)
-    return spot
+    return _with_partner(db, spot)
 
 
 @router.put("/{spot_id}/image", response_model=DateSpotDisplay)
@@ -623,8 +651,7 @@ def replace_date_spot_image(
 ):
     """Add or replace a spot's photo (e.g. an admin illustrating a starter spot)."""
     spot = _get_spot(db, spot_id)
-    if not _can_manage(db, spot, current_user):
-        raise HTTPException(status_code=403, detail="You can only edit places you added.")
+    _require_manage(db, spot, current_user, "You can only edit places you added.")
 
     old_public_id = spot.public_id
     spot.image_url, spot.public_id = _upload_image(image)
@@ -637,7 +664,7 @@ def replace_date_spot_image(
         except Exception:
             # The new photo is already saved; a leftover old file is harmless.
             pass
-    return spot
+    return _with_partner(db, spot)
 
 
 @router.delete("/{spot_id}")
@@ -648,8 +675,7 @@ def delete_date_spot(
 ):
     """Authors can remove their own spot; admins can remove any (moderation)."""
     spot = _get_spot(db, spot_id)
-    if not _can_manage(db, spot, current_user):
-        raise HTTPException(status_code=403, detail="You can only remove places you added.")
+    _require_manage(db, spot, current_user, "You can only remove places you added.")
 
     if spot.public_id:
         try:
