@@ -537,8 +537,9 @@ def verify_otp_email(request:VerifyOTPRequest,db:Session = Depends(get_db)):
     if record.code != request.otp:
         raise HTTPException(400, "Invalid OTP")
 
-    # delete after success
-    db.query(OTP).delete()
+    # Used: clear this person's codes - only theirs. It used to empty the whole
+    # table, so anyone else signing up at the same moment got "OTP not found".
+    db.query(OTP).filter(OTP.email == request.email).delete()
     db.commit()
     return {"message": "Email verified"}
 

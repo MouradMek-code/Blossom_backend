@@ -252,7 +252,9 @@ class ProfileDisplay(BaseModel):
     drinking: Optional[str]
     exercise_frequency: Optional[str]
 
-    has_pets: str
+    # Every answer may be empty: one missing value used to fail the whole
+    # Browse / matches / Likes You list for everyone who'd see that profile.
+    has_pets: Optional[str] = None
 
     relationship_goal: Optional[str]
     first_date_preference: Optional[str] = None
@@ -272,7 +274,7 @@ class ProfileDisplay(BaseModel):
     # included) inside every photo, tripling the payload for nothing.
     photos: List[ProfilePhotoLean]
 
-    created_at: datetime
+    created_at: Optional[datetime] = None
     # Browse only: this person already liked the viewer. Clients put them at
     # the front of the deck with a "Likes you" tag. False everywhere else.
     likes_you: bool = False
@@ -311,14 +313,15 @@ class ProfileDisplayforPhoto(BaseModel):
     drinking: Optional[str]
     exercise_frequency: Optional[str]
 
-    has_pets: str
+    has_pets: Optional[str] = None
 
     relationship_goal: Optional[str]
     first_date_preference: Optional[str] = None
     past_relationships_count: Optional[str] = None
     last_breakup_reason: Optional[str] = None
 
-    has_children: str
+    # Language-exchange members skip the family questions.
+    has_children: Optional[str] = None
     wants_children: Optional[str]
 
     personality_type: Optional[str]
@@ -327,7 +330,7 @@ class ProfileDisplayforPhoto(BaseModel):
 
     photos: List[ProfilePhotoDisplayWithoutProfile]
 
-    created_at: datetime
+    created_at: Optional[datetime] = None
     user: User
     class Config:
         orm_mode = True
