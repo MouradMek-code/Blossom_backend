@@ -13,6 +13,7 @@ import html
 import os
 import re
 import secrets
+import unicodedata
 from collections import defaultdict
 from datetime import datetime, timedelta
 
@@ -61,6 +62,54 @@ def _check_offer_fields(title, max_couples, ends_at, valid_hours, now):
         raise HTTPException(status_code=400, detail="The end date must be in the future.")
 
 
+# ---- places already on Blossom ------------------------------------------------------
+
+def _fold(value) -> str:
+    """"Café Rosé" -> "cafe rose": search ignores accents and case."""
+    value = unicodedata.normalize("NFKD", str(value or "")).lower()
+    return "".join(c for c in value if not unicodedata.combining(c))
+
+
+def _spot_brief(spot: DbDateSpot, partner: bool) -> dict:
+    return {
+        "id": spot.id,
+        "name": spot.name,
+        "neighborhood": spot.neighborhood,
+        "city": spot.city,
+        "country": spot.country,
+        "image_url": spot.image_url,
+        "category": spot.category,
+        # Already a Blossom partner: new gifts are asked for from its manager page.
+        "partner": partner,
+    }
+
+
+def search_spots(db: Session, query: str, limit: int = 8) -> list:
+    """Spots whose name (or name + city) contains every word typed."""
+    words = _fold(query).split()
+    if not words or len("".join(words)) < 2:
+        return []
+    found = []
+    for spot in db.query(DbDateSpot).order_by(DbDateSpot.name).all():
+        name = _fold(spot.name)
+        haystack = f"{name} {_fold(spot.neighborhood)} {_fold(spot.city)}"
+        if all(w in haystack for w in words):
+            # Names starting with what was typed first.
+            found.append((0 if name.startswith(words[0]) else 1, spot))
+    found.sort(key=lambda item: item[0])
+    spots = [spot for _, spot in found[:limit]]
+    partners = {sid for (sid,) in db.query(DbVenue.spot_id).filter(DbVenue.spot_id.in_([s.id for s in spots]))} if spots else set()
+    return [_spot_brief(s, s.id in partners) for s in spots]
+
+
+def spot_for_form(db: Session, spot_id: int) -> dict:
+    spot = db.get(DbDateSpot, spot_id)
+    if not spot:
+        raise HTTPException(status_code=404, detail="This place isn't on Blossom anymore.")
+    partner = db.query(DbVenue.id).filter(DbVenue.spot_id == spot.id).first() is not None
+    return _spot_brief(spot, partner)
+
+
 # ---- requests --------------------------------------------------------------------
 
 def create_request(db: Session, background_tasks: BackgroundTasks, data: dict, venue: DbVenue = None,
@@ -69,20 +118,42 @@ def create_request(db: Session, background_tasks: BackgroundTasks, data: dict, v
     title = _text(data.get("offer_title"), 120)
     _check_offer_fields(title, data.get("max_couples"), data.get("ends_at"), data.get("valid_hours"), now)
 
+    spot = None
+    if venue is None and data.get("spot_id"):
+        spot = db.get(DbDateSpot, data["spot_id"])
+        if not spot:
+            raise HTTPException(status_code=404, detail={
+                "reason": "spot_gone",
+                "message": "This place isn't on Blossom anymore. Please fill in your place instead.",
+            })
+        # A partner already has a manager page, where new gifts are asked for.
+        # Not accepted from the public form: approving it would send the
+        # venue's manager link and staff code to whoever filled it in.
+        if db.query(DbVenue.id).filter(DbVenue.spot_id == spot.id).first():
+            raise HTTPException(status_code=409, detail={
+                "reason": "already_partner",
+                "message": "This place is already a Blossom partner: new gifts are asked for from its "
+                           "manager page. Ask the person who manages it, or have the link sent to the "
+                           "venue's email.",
+            })
+
     if venue is None:
-        name = _text(data.get("venue_name"), 150)
         email = _text(data.get("contact_email"), 200)
-        city = _text(data.get("city"), 120)
-        country = _text(data.get("country"), 120)
-        if not name or len(name) < 2:
-            raise HTTPException(status_code=400, detail="Enter the name of your place.")
-        if not city or not country:
-            raise HTTPException(status_code=400, detail="Enter the city and the country.")
+        if spot is not None:
+            name, city, country, map_url = spot.name, spot.city, spot.country, spot.map_url
+        else:
+            name = _text(data.get("venue_name"), 150)
+            city = _text(data.get("city"), 120)
+            country = _text(data.get("country"), 120)
+            if not name or len(name) < 2:
+                raise HTTPException(status_code=400, detail="Enter the name of your place.")
+            if not city or not country:
+                raise HTTPException(status_code=400, detail="Enter the city and the country.")
+            map_url = _text(data.get("map_url"), 500)
+            if map_url and not map_url.lower().startswith(("http://", "https://")):
+                raise HTTPException(status_code=400, detail="The Google Maps link should start with https://")
         if not email or not EMAIL_RE.match(email):
             raise HTTPException(status_code=400, detail="Enter a valid email address, so we can answer you.")
-        map_url = _text(data.get("map_url"), 500)
-        if map_url and not map_url.lower().startswith(("http://", "https://")):
-            raise HTTPException(status_code=400, detail="The Google Maps link should start with https://")
         recent = db.query(func.count(DbPartnerRequest.id)).filter(
             func.lower(DbPartnerRequest.contact_email) == email.lower(),
             DbPartnerRequest.status == "pending",
@@ -98,6 +169,7 @@ def create_request(db: Session, background_tasks: BackgroundTasks, data: dict, v
 
     request = DbPartnerRequest(
         created_at=now, status="pending", venue_id=venue.id if venue else None,
+        spot_id=spot.id if spot else None,
         venue_name=name, map_url=map_url, city=city, country=country,
         about=_long_text(data.get("about"), 1000),
         offer_title=title, offer_details=_long_text(data.get("offer_details"), 500),
@@ -122,6 +194,9 @@ def _suggested_spot(db: Session, request: DbPartnerRequest):
     creating a double."""
     if request.venue_id:
         return None
+    # The venue picked its place on the form.
+    if request.spot_id and request.spot:
+        return request.spot
     if request.map_url:
         spot = db.query(DbDateSpot).filter(DbDateSpot.map_url == request.map_url).first()
         if spot:
@@ -161,6 +236,8 @@ def request_view(db: Session, request: DbPartnerRequest):
         "refuse_reason": request.refuse_reason,
         "offer_id": request.offer_id,
         "suggested_spot": {"id": suggested.id, "name": suggested.name, "city": suggested.city} if suggested else None,
+        # True when the venue itself said "this is my place" on the form.
+        "spot_chosen": bool(request.spot_id),
         "venue": venue_view(venue) if venue else None,
     }
 

@@ -120,6 +120,11 @@ with engine.begin() as connection:
     connection.execute(text(
         "ALTER TABLE spot_vouchers ADD COLUMN IF NOT EXISTS reminded_at TIMESTAMP"
     ))
+    # A partner request for a place already on Blossom (the spot it picked).
+    connection.execute(text(
+        "ALTER TABLE partner_requests ADD COLUMN IF NOT EXISTS spot_id INTEGER "
+        "REFERENCES date_spots(id) ON DELETE SET NULL"
+    ))
     # Profiles an admin made for a friend, waiting for the friend to confirm.
     for column in (
         "created_by INTEGER",

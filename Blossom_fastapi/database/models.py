@@ -624,7 +624,11 @@ class DbPartnerRequest(Base):
     reviewed_at = Column(DateTime, nullable=True)
     refuse_reason = Column(Text, nullable=True)
     offer_id = Column(Integer, ForeignKey("spot_offers.id", ondelete="SET NULL"), nullable=True)
+    # The date spot the venue picked on the form ("my place is already on
+    # Blossom"): approving puts the promotion on it instead of a new spot.
+    spot_id = Column(Integer, ForeignKey("date_spots.id", ondelete="SET NULL"), nullable=True)
     venue = relationship("DbVenue")
+    spot = relationship("DbDateSpot")
 
 
 class DbBusinessMessage(Base):

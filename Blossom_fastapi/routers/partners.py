@@ -26,10 +26,13 @@ def _utc(value: Optional[datetime]):
 
 
 class PartnerRequestIn(BaseModel):
-    venue_name: str = Field(max_length=150)
+    # A place already on Blossom, picked on the form: then name, city and
+    # country come from its spot and can be left out.
+    spot_id: Optional[int] = None
+    venue_name: Optional[str] = Field(default=None, max_length=150)
     map_url: Optional[str] = Field(default=None, max_length=500)
-    city: str = Field(max_length=120)
-    country: str = Field(max_length=120)
+    city: Optional[str] = Field(default=None, max_length=120)
+    country: Optional[str] = Field(default=None, max_length=120)
     about: Optional[str] = Field(default=None, max_length=1000)
     offer_title: str = Field(max_length=120)
     offer_details: Optional[str] = Field(default=None, max_length=500)
@@ -105,6 +108,18 @@ def _require_admin(user: UserAuth):
 
 
 # ---- the public form ------------------------------------------------------------
+
+@router.get("/spots")
+def search_spots(q: str = "", db: Session = Depends(get_db)):
+    """"Is your place already on Blossom?" - date spots by name, for the form."""
+    return db_partners.search_spots(db, q)
+
+
+@router.get("/spots/{spot_id}")
+def spot_for_form(spot_id: int, db: Session = Depends(get_db)):
+    """The spot a "Is this your place?" link opens the form with."""
+    return db_partners.spot_for_form(db, spot_id)
+
 
 @router.post("/requests")
 def send_request(payload: PartnerRequestIn, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
