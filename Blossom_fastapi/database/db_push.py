@@ -80,6 +80,42 @@ TEXTS = {
         "zh": "📩 来自 {name}{business} 的新消息",
         "ar": "📩 رسالة جديدة من {name}{business}",
     },
+    "event_interest": {
+        "en": "🙋 {name} is interested in your event “{title}”",
+        "fr": "🙋 {name} est intéressé·e par votre événement « {title} »",
+        "zh": "🙋 {name} 对你的活动“{title}”感兴趣",
+        "ar": "🙋 {name} مهتم بفعاليتك «{title}»",
+    },
+    "event_match": {
+        "en": "🎉 It's a match! {name} chose you for “{title}”",
+        "fr": "🎉 C'est un match ! {name} vous a choisi·e pour « {title} »",
+        "zh": "🎉 配对成功！{name} 在活动“{title}”中选择了你",
+        "ar": "🎉 تطابق! اختارك {name} لفعالية «{title}»",
+    },
+    "event_comment": {
+        "en": "💬 {name} commented on “{title}”",
+        "fr": "💬 {name} a commenté « {title} »",
+        "zh": "💬 {name} 评论了“{title}”",
+        "ar": "💬 علّق {name} على «{title}»",
+    },
+    "event_reply": {
+        "en": "↳ {name} replied to your comment on “{title}”",
+        "fr": "↳ {name} a répondu à votre commentaire sur « {title} »",
+        "zh": "↳ {name} 回复了你在“{title}”下的评论",
+        "ar": "↳ ردّ {name} على تعليقك في «{title}»",
+    },
+    "event_cancelled": {
+        "en": "📅 “{title}” is cancelled",
+        "fr": "📅 « {title} » est annulé",
+        "zh": "📅 “{title}”已取消",
+        "ar": "📅 أُلغيت فعالية «{title}»",
+    },
+    "event_report": {
+        "en": "🚩 Event reported: {title}",
+        "fr": "🚩 Événement signalé : {title}",
+        "zh": "🚩 活动被举报：{title}",
+        "ar": "🚩 تم الإبلاغ عن فعالية: {title}",
+    },
     "spot_suggestion": {
         "en": "📍 New place suggested by {author}: {name} ({city})",
         "fr": "📍 Nouveau lieu suggéré par {author} : {name} ({city})",
@@ -340,6 +376,52 @@ def notify_spot_approved(db: Session, background_tasks: BackgroundTasks, spot):
             "channelId": "default",
         }
         for token, language in rows
+    ])
+
+
+def notify_event_interest(db: Session, background_tasks: BackgroundTasks, event, interested):
+    """"🙋 Tom is interested in your event "Monet + coffee"" to the organiser."""
+    _queue(background_tasks, _messages_for_profile(
+        db, event.profile_id, "event_interest", interested.first_name,
+        {"type": "event", "eventId": event.id}, title=event.title))
+
+
+def notify_event_match(db: Session, background_tasks: BackgroundTasks, event, organizer, profile_id, conversation_id):
+    """"🎉 It's a match! Sara chose you for ..." to the person matched."""
+    _queue(background_tasks, _messages_for_profile(
+        db, profile_id, "event_match", organizer.first_name if organizer else "",
+        {"type": "message", "conversationId": conversation_id}, title=event.title))
+
+
+def notify_event_comment(db: Session, background_tasks: BackgroundTasks, event, author, recipient_profile_id, reply=False):
+    """A new comment on my event, or a reply to my comment."""
+    _queue(background_tasks, _messages_for_profile(
+        db, recipient_profile_id, "event_reply" if reply else "event_comment", author.first_name,
+        {"type": "event", "eventId": event.id}, title=event.title))
+
+
+def notify_event_cancelled(db: Session, background_tasks: BackgroundTasks, event, profile_ids):
+    """The organiser cancelled: the people who were interested are told."""
+    messages = []
+    for profile_id in profile_ids:
+        messages += _messages_for_profile(db, profile_id, "event_cancelled", "",
+                                          {"type": "event", "eventId": event.id}, title=event.title)
+    _queue(background_tasks, messages)
+
+
+def notify_event_report(db: Session, background_tasks: BackgroundTasks, event):
+    """"🚩 Event reported: ..." to the admins."""
+    _queue(background_tasks, [
+        {
+            "to": token,
+            "title": "Blossom",
+            "body": TEXTS["event_report"][normalize_language(language)].format(title=event.title),
+            "data": {"type": "event_report", "eventId": event.id},
+            "sound": "default",
+            "channelId": "default",
+            "priority": "high",
+        }
+        for token, language in _admin_targets(db).items()
     ])
 
 

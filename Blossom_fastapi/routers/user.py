@@ -52,6 +52,7 @@ def get_me(db: Session = Depends(get_db), current_user: UserAuth = Depends(get_c
         "email": current_user.email,
         "is_admin": bool(getattr(current_user, "is_admin", False)),
         "profile_id": profile.id if profile else None,
+        "gender": profile.gender if profile else None,
     }
 
 # Also above GET /{id}, for the same reason as /me.

@@ -248,7 +248,8 @@ class DbMatch(Base):
             default=False,
             server_default="false"
         )
-
+        # Made by an event's organiser (see db_events.answer_interest).
+        event_id = Column(Integer, ForeignKey("events.id", ondelete="SET NULL"), nullable=True)
         conversation = relationship(
             "DbConversation",
             back_populates="match",
@@ -663,4 +664,75 @@ class DbBusinessMessage(Base):
     topic = Column(String(20), nullable=False)  # partnership | question | problem | other
     message = Column(Text, nullable=False)
     language = Column(String(8), nullable=True)
+    handled = Column(Boolean, nullable=False, default=False, server_default="false")
+
+
+class DbEvent(Base):
+    """An event a member organises: a date idea (one person), a group outing
+    or a language exchange - a set time, a public place. Members comment and
+    say "I'm interested"; the organiser matches the people they'd like to
+    meet (a normal match, see db_events). Date spots are places; events are
+    moments, possibly at a date spot."""
+    __tablename__ = "events"
+    id = Column(Integer, primary_key=True)
+    profile_id = Column(Integer, ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    kind = Column(String(12), nullable=False, default="group")  # date | group | language
+    title = Column(String(120), nullable=False)
+    description = Column(Text, nullable=False)
+    starts_at = Column(DateTime, nullable=False, index=True)  # UTC
+    ends_at = Column(DateTime, nullable=True)
+    place_name = Column(String(150), nullable=False)
+    map_url = Column(String(500), nullable=True)
+    city = Column(String(120), nullable=False, index=True)
+    country = Column(String(120), nullable=False)
+    spot_id = Column(Integer, ForeignKey("date_spots.id", ondelete="SET NULL"), nullable=True, index=True)
+    max_people = Column(Integer, nullable=True)  # group outings
+    languages = Column(String(200), nullable=True)  # "French,Spanish" - language exchange
+    women_only = Column(Boolean, nullable=False, default=False, server_default="false")
+    comments_open = Column(Boolean, nullable=False, default=True, server_default="true")
+    image_url = Column(String(500), nullable=True)
+    public_id = Column(String(255), nullable=True)
+    status = Column(String(12), nullable=False, default="active", server_default="active", index=True)  # active | cancelled | removed
+    created_at = Column(DateTime, nullable=False)
+    profile = relationship("DbProfile")
+    spot = relationship("DbDateSpot")
+
+
+class DbEventComment(Base):
+    """A comment under an event (members only). A reply has parent_id. Deleted
+    ones keep their place in the thread, without the text."""
+    __tablename__ = "event_comments"
+    id = Column(Integer, primary_key=True)
+    event_id = Column(Integer, ForeignKey("events.id", ondelete="CASCADE"), nullable=False, index=True)
+    profile_id = Column(Integer, ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    parent_id = Column(Integer, ForeignKey("event_comments.id", ondelete="CASCADE"), nullable=True)
+    text = Column(Text, nullable=False)
+    created_at = Column(DateTime, nullable=False)
+    deleted_at = Column(DateTime, nullable=True)
+    profile = relationship("DbProfile")
+
+
+class DbEventInterest(Base):
+    """"I'm interested" in an event - the member's yes. The organiser answers:
+    matched (a normal match is made) or declined (never told)."""
+    __tablename__ = "event_interests"
+    __table_args__ = (UniqueConstraint("event_id", "profile_id", name="uq_event_interest"),)
+    id = Column(Integer, primary_key=True)
+    event_id = Column(Integer, ForeignKey("events.id", ondelete="CASCADE"), nullable=False, index=True)
+    profile_id = Column(Integer, ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at = Column(DateTime, nullable=False)
+    status = Column(String(10), nullable=False, default="pending")  # pending | matched | declined
+    answered_at = Column(DateTime, nullable=True)
+    profile = relationship("DbProfile")
+
+
+class DbEventReport(Base):
+    """An event, or a comment under it, reported by a member - for the admins."""
+    __tablename__ = "event_reports"
+    id = Column(Integer, primary_key=True)
+    event_id = Column(Integer, ForeignKey("events.id", ondelete="CASCADE"), nullable=False, index=True)
+    comment_id = Column(Integer, ForeignKey("event_comments.id", ondelete="CASCADE"), nullable=True)
+    reporter_profile_id = Column(Integer, ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False)
+    reason = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False)
     handled = Column(Boolean, nullable=False, default=False, server_default="false")

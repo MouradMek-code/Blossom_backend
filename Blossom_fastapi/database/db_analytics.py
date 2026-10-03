@@ -20,8 +20,8 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
 from database.models import (
-    DbAdminDevice, DbDateSpot, DbMatch, DbMessage, DbProfile, DbProfileLike, DbReport, DbSpotVoucher,
-    DbUser, DbVisit, DbVisitPage,
+    DbAdminDevice, DbDateSpot, DbEvent, DbEventComment, DbEventInterest, DbMatch, DbMessage, DbProfile,
+    DbProfileLike, DbReport, DbSpotVoucher, DbUser, DbVisit, DbVisitPage,
 )
 
 SESSION = timedelta(minutes=30)
@@ -384,6 +384,18 @@ def _member_actions(db: Session, start: datetime, end: datetime) -> dict:
         db, DbSpotVoucher.created_at, DbSpotVoucher.profile1_id, DbSpotVoucher.profile2_id, start, end))
     put("gifts_used", _pair_counts(
         db, DbSpotVoucher.used_at, DbSpotVoucher.profile1_id, DbSpotVoucher.profile2_id, start, end))
+    put("events_created", _counts(
+        db.query(DbEvent.profile_id, func.count(DbEvent.id))
+        .filter(DbEvent.created_at >= start, DbEvent.created_at < end)
+        .group_by(DbEvent.profile_id).all()))
+    put("event_interests", _counts(
+        db.query(DbEventInterest.profile_id, func.count(DbEventInterest.id))
+        .filter(DbEventInterest.created_at >= start, DbEventInterest.created_at < end)
+        .group_by(DbEventInterest.profile_id).all()))
+    put("event_comments", _counts(
+        db.query(DbEventComment.profile_id, func.count(DbEventComment.id))
+        .filter(DbEventComment.created_at >= start, DbEventComment.created_at < end)
+        .group_by(DbEventComment.profile_id).all()))
     put("reports", _counts(
         db.query(DbReport.reporter_profile_id, func.count(DbReport.id))
         .filter(DbReport.created_at >= start, DbReport.created_at < end)

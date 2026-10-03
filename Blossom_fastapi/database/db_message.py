@@ -184,7 +184,14 @@ def get_conversation_details(
         # locally stored profile id that may be missing.
         "me_profile_id": profile_id,
         "profile": _profile_card(other),
+        # "Matched through the event: ..." when an event's organiser made the match.
+        "event": _match_event(db, match),
     }
+
+
+def _match_event(db: Session, match):
+    from database.db_events import match_event
+    return match_event(db, match)
 
 
 def get_inbox(
