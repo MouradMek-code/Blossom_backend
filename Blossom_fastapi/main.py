@@ -132,6 +132,10 @@ with engine.begin() as connection:
     connection.execute(text(
         "ALTER TABLE date_spots ADD COLUMN IF NOT EXISTS wants_gift BOOLEAN NOT NULL DEFAULT false"
     ))
+    # Where each spot is, for the map (see database/db_spot_geo.py).
+    connection.execute(text("ALTER TABLE date_spots ADD COLUMN IF NOT EXISTS lat DOUBLE PRECISION"))
+    connection.execute(text("ALTER TABLE date_spots ADD COLUMN IF NOT EXISTS lng DOUBLE PRECISION"))
+    connection.execute(text("ALTER TABLE date_spots ADD COLUMN IF NOT EXISTS geo_key VARCHAR(40)"))
     connection.execute(text(
         "CREATE INDEX IF NOT EXISTS ix_date_spots_status ON date_spots (status)"
     ))
@@ -243,7 +247,9 @@ app.add_middleware(
 #  * "⏰ Your -20% at Café Lune ends in 5 h": remind couples whose promotion
 #    code is about to expire (once per code - see db_push.send_voucher_reminders);
 #  * delete the dashboard's page-by-page details older than a week
-#    (db_analytics.delete_old_pages).
+#    (db_analytics.delete_old_pages);
+#  * put new and edited date spots on the map (db_spot_geo.locate_pending) -
+#    the first run, at start-up, does the spots already there.
 # A background thread keeps it simple; while the server sleeps, the jobs
 # simply wait until it wakes up.
 import logging  # noqa: E402
@@ -251,7 +257,7 @@ import threading  # noqa: E402
 import time  # noqa: E402
 
 from database.database import SessionLocal  # noqa: E402
-from database import db_analytics, db_push  # noqa: E402
+from database import db_analytics, db_push, db_spot_geo  # noqa: E402
 
 VOUCHER_REMINDERS_EVERY = 600  # seconds
 
@@ -270,6 +276,7 @@ def _voucher_reminder_loop():
     while True:
         _run_job("Voucher reminders", db_push.send_voucher_reminders)
         _run_job("Old dashboard pages clean-up", db_analytics.delete_old_pages)
+        _run_job("Date spot positions", db_spot_geo.locate_pending)
         time.sleep(VOUCHER_REMINDERS_EVERY)
 
 

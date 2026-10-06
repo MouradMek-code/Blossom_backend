@@ -11,7 +11,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from sqlalchemy.orm import Session, selectinload
 
 from auth.oauth2 import get_current_user
-from database import db_message, db_offers, db_profile, db_push
+from database import db_message, db_offers, db_profile, db_push, db_spot_geo
 from database.database import get_db
 from database.models import DbDateSpot, DbMatch, DbProfile, DbSpotOffer, DbUser, DbVenue
 from database.starter_spots import STARTER_CITY, STARTER_COUNTRY, STARTER_SPOTS
@@ -600,8 +600,11 @@ def create_date_spot(
     db.add(spot)
     db.commit()
     db.refresh(spot)
-    if spot.status == "pending" and background_tasks is not None:
-        db_push.notify_spot_suggestion(db, background_tasks, spot, profile.first_name)
+    if background_tasks is not None:
+        # Its pin on the map, after the answer (it may take a few seconds).
+        background_tasks.add_task(db_spot_geo.locate_spot_id, spot.id)
+        if spot.status == "pending":
+            db_push.notify_spot_suggestion(db, background_tasks, spot, profile.first_name)
     return spot
 
 
@@ -609,6 +612,7 @@ def create_date_spot(
 def update_date_spot(
     spot_id: int,
     payload: DateSpotUpdate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: UserAuth = Depends(get_current_user),
 ):
@@ -654,6 +658,9 @@ def update_date_spot(
 
     db.commit()
     db.refresh(spot)
+    # A new link, name or city: move its pin (nothing to do otherwise).
+    if spot.geo_key != db_spot_geo.geo_key(spot):
+        background_tasks.add_task(db_spot_geo.locate_spot_id, spot.id)
     return _with_partner(db, spot)
 
 

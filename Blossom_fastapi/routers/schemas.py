@@ -526,6 +526,9 @@ class DateSpotDisplay(BaseModel):
     # "published", or "pending" for a member's suggestion waiting for an admin.
     status: Optional[str] = "published"
     wants_gift: bool = False
+    # Its pin on the map; null = not located (yet).
+    lat: Optional[float] = None
+    lng: Optional[float] = None
 
     # Stored as "First date,Casual"; clients get a proper list.
     @field_validator("best_for", mode="before")

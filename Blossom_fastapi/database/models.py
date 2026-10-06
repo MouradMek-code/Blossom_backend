@@ -1,4 +1,4 @@
-from sqlalchemy import  ForeignKey, DateTime,Column, Integer, String, Text, Boolean,Date,UniqueConstraint
+from sqlalchemy import  ForeignKey, DateTime,Column, Integer, String, Text, Boolean,Date,UniqueConstraint, Float
 from .database import Base
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -430,6 +430,13 @@ class DbDateSpot(Base):
 
     # Optional Google Maps link so people can actually navigate there.
     map_url = Column(String(500), nullable=True)
+
+    # Its position on the map, worked out from the link or the name and city
+    # (database/db_spot_geo.py). geo_key = what it was worked out from, so a
+    # change triggers a new lookup. No position = not on the map.
+    lat = Column(Float, nullable=True)
+    lng = Column(Float, nullable=True)
+    geo_key = Column(String(40), nullable=True)
 
     # Vibe tag, drawn from the same list as a profile's first_date_preference
     # so spots and people speak the same language.
