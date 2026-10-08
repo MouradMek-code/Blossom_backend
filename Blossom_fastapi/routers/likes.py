@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from auth.oauth2 import get_current_user
 from database.database import get_db
-from database import db_like, db_push
+from database import db_block, db_like, db_push
 from routers.schemas import UserAuth, ProfileDisplay
 from database.models import DbProfileLike,DbProfile,DbMatch
 
@@ -41,6 +41,14 @@ def unseen_likes_count(
     current_user: UserAuth = Depends(get_current_user)
 ):
     return {"count": db_like.count_unseen_likes(db, current_user.id)}
+
+@router.get("/profile_likes/summary")
+def likes_summary(
+    db: Session = Depends(get_db),
+    current_user: UserAuth = Depends(get_current_user)
+):
+    """{total, new, photos}: the "Likes you" circle at the top of Chats."""
+    return db_like.likes_summary(db, current_user.id)
 
 @router.post("/profile_likes/mark_seen")
 def mark_likes_seen(
@@ -97,6 +105,8 @@ def profile_likers_full(db: Session = Depends(get_db),
         m.profile2_id if m.profile1_id == profile.id else m.profile1_id
         for m in matched
     ]
+    # Blocked either way: not shown (the same people as the "Likes you" circle).
+    matched_ids += list(db_block.get_block_relation_ids(db, profile.id))
 
     liker_ids = [
         liker_id for (liker_id,) in db.query(DbProfileLike.liker_profile_id).filter(

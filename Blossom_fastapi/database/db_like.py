@@ -101,3 +101,43 @@ def mark_likes_seen(
     ).update({DbProfileLike.seen: True})
 
     db.commit()
+
+
+def likes_summary(db: Session, current_user_id: int, photo_count: int = 3):
+    """The "Likes you" circle at the top of Chats: how many people like me
+    (not matched yet, not blocked either way), how many are new, and the first
+    photo of the latest few - the circle shows them blurred."""
+    from database.models import DbProfilePhoto
+
+    profile = db.query(DbProfile).filter(DbProfile.user_id == current_user_id).first()
+    if not profile:
+        return {"total": 0, "new": 0, "photos": []}
+    matched = db.query(DbMatch).filter(
+        (DbMatch.profile1_id == profile.id) | (DbMatch.profile2_id == profile.id)
+    ).all()
+    hidden = {m.profile2_id if m.profile1_id == profile.id else m.profile1_id for m in matched}
+    hidden |= set(db_block.get_block_relation_ids(db, profile.id))
+
+    likes = [
+        (liker_id, seen)
+        for liker_id, seen in db.query(DbProfileLike.liker_profile_id, DbProfileLike.seen)
+        .filter(DbProfileLike.liked_profile_id == profile.id)
+        .order_by(DbProfileLike.created_at.desc(), DbProfileLike.id.desc())
+        .all()
+        if liker_id not in hidden
+    ]
+    latest = [liker_id for liker_id, _ in likes[:photo_count]]
+    first_photo = {}
+    if latest:
+        for profile_id, url in (
+            db.query(DbProfilePhoto.profile_id, DbProfilePhoto.image_url)
+            .filter(DbProfilePhoto.profile_id.in_(latest))
+            .order_by(DbProfilePhoto.id)
+            .all()
+        ):
+            first_photo.setdefault(profile_id, url)
+    return {
+        "total": len(likes),
+        "new": sum(1 for _, seen in likes if not seen),
+        "photos": [first_photo[i] for i in latest if i in first_photo],
+    }
