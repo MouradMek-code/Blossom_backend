@@ -529,6 +529,8 @@ class DateSpotDisplay(BaseModel):
     # Its pin on the map; null = not located (yet).
     lat: Optional[float] = None
     lng: Optional[float] = None
+    # ♡ by the person asking (always false for visitors).
+    saved: bool = False
 
     # Stored as "First date,Casual"; clients get a proper list.
     @field_validator("best_for", mode="before")

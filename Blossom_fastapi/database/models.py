@@ -743,3 +743,16 @@ class DbEventReport(Base):
     reason = Column(Text, nullable=True)
     created_at = Column(DateTime, nullable=False)
     handled = Column(Boolean, nullable=False, default=False, server_default="false")
+
+
+class DbSpotSave(Base):
+    """A date spot a member saved (♡) - to find it again, and to invite a
+    match there in one tap from the chat."""
+    __tablename__ = "spot_saves"
+
+    id = Column(Integer, primary_key=True, index=True)
+    profile_id = Column(Integer, ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    spot_id = Column(Integer, ForeignKey("date_spots.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (UniqueConstraint("profile_id", "spot_id", name="uq_spot_save"),)
