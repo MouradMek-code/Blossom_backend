@@ -438,6 +438,11 @@ class DbDateSpot(Base):
     lng = Column(Float, nullable=True)
     geo_key = Column(String(40), nullable=True)
 
+    # "Spot of the week", picked by an admin: shown on top until then, with
+    # the admin's few words about it.
+    featured_until = Column(DateTime, nullable=True)
+    featured_note = Column(String(300), nullable=True)
+
     # Vibe tag, drawn from the same list as a profile's first_date_preference
     # so spots and people speak the same language.
     category = Column(String(60), nullable=True, index=True)

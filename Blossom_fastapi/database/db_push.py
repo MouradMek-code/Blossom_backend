@@ -128,6 +128,12 @@ TEXTS = {
         "zh": "🎉 你推荐的地点 {name} 已上线 Blossom，谢谢！",
         "ar": "🎉 مكانك {name} أصبح الآن على Blossom - شكرًا لك!",
     },
+    "partner_offer": {
+        "en": "🎁 New gift published by {name}: {title}",
+        "fr": "🎁 Nouveau cadeau publié par {name} : {title}",
+        "zh": "🎁 {name} 发布了新礼物：{title}",
+        "ar": "🎁 هدية جديدة نشرها {name}: {title}",
+    },
     "partner_request": {
         "en": "🏪 New partner request: {name} - {title}",
         "fr": "🏪 Nouvelle demande de partenariat : {name} - {title}",
@@ -320,6 +326,25 @@ def _admin_targets(db: Session, exclude_user_id=None):
         for row in db.query(DbAdminAlertToken).filter(DbAdminAlertToken.user_id.in_(admin_ids)).all():
             targets.setdefault(row.token, row.language)
     return targets
+
+
+def notify_partner_offer(db: Session, background_tasks: BackgroundTasks, venue_name, title):
+    """"🎁 New gift published by Café Lune: ..." to the admins - a partner's
+    new gift goes live at once; this is the admins' chance to check it."""
+    targets = _admin_targets(db)
+    _queue(background_tasks, [
+        {
+            "to": token,
+            "title": "Blossom",
+            "body": TEXTS["partner_offer"][normalize_language(language)].format(name=venue_name, title=title),
+            # Opens Admin → Promos, where it can be paused.
+            "data": {"type": "partner_request"},
+            "sound": "default",
+            "channelId": "default",
+            "priority": "high",
+        }
+        for token, language in targets.items()
+    ])
 
 
 def notify_partner_request(db: Session, background_tasks: BackgroundTasks, request):

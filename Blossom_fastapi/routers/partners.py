@@ -188,11 +188,12 @@ def manage_offer(token: str, offer_id: int, payload: ManagerOfferUpdate, db: Ses
 @router.post("/manage/{token}/requests")
 def manage_new_offer(token: str, payload: NewOfferIn, background_tasks: BackgroundTasks,
                      db: Session = Depends(get_db)):
-    """A new offer: comes to the admins as a request."""
+    """A new gift from a partner: live at once (the admins are told and can
+    pause it)."""
     venue = db_partners.venue_by_token(db, token)
     data = payload.model_dump()
     data["ends_at"] = _utc(data.get("ends_at"))
-    return db_partners.create_request(db, background_tasks, data, venue=venue)
+    return db_partners.publish_offer(db, background_tasks, venue, data)
 
 
 # ---- businesses: lost link, contact us --------------------------------------------

@@ -1,6 +1,7 @@
 import os
 import re
 import unicodedata
+from datetime import datetime, timedelta
 from typing import List, Optional, Union
 from urllib.parse import parse_qs, quote_plus, unquote_plus, urljoin, urlparse
 
@@ -8,13 +9,16 @@ import cloudinary
 import cloudinary.uploader
 import requests
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from auth.oauth2 import get_current_user
 from database import db_message, db_offers, db_profile, db_push, db_spot_geo
 from database.database import get_db
-from database.models import DbDateSpot, DbMatch, DbProfile, DbSpotOffer, DbSpotSave, DbUser, DbVenue
+from database.models import (
+    DbDateSpot, DbEvent, DbMatch, DbProfile, DbSpotOffer, DbSpotSave, DbSpotVoucher, DbUser, DbVenue,
+)
 from database.starter_spots import STARTER_CITY, STARTER_COUNTRY, STARTER_SPOTS
 from routers.analytics import optional_user
 from routers.schemas import (
@@ -23,6 +27,8 @@ from routers.schemas import (
     DateSpotInviteResult,
     DateSpotStatsUpdate,
     DateSpotUpdate,
+    FeaturedSpot,
+    FeatureSpotIn,
     MessageDisplay,
     UserAuth,
 )
@@ -252,16 +258,44 @@ def _partner_spot_ids(db: Session, spot_ids) -> set:
     return {sid for (sid,) in venues} | {sid for (sid,) in offers}
 
 
+def _counts(db: Session, spot_ids):
+    """Social proof per spot: ♥ saves, upcoming events, couples who used its
+    gift at the counter - three grouped queries for the whole list."""
+    if not spot_ids:
+        return {}, {}, {}
+    saves = dict(
+        db.query(DbSpotSave.spot_id, func.count(DbSpotSave.id))
+        .filter(DbSpotSave.spot_id.in_(spot_ids)).group_by(DbSpotSave.spot_id).all()
+    )
+    events = dict(
+        db.query(DbEvent.spot_id, func.count(DbEvent.id))
+        .filter(DbEvent.spot_id.in_(spot_ids), DbEvent.status == "active", DbEvent.starts_at >= datetime.utcnow())
+        .group_by(DbEvent.spot_id).all()
+    )
+    couples = dict(
+        db.query(DbSpotOffer.spot_id, func.count(DbSpotVoucher.id))
+        .join(DbSpotVoucher, DbSpotVoucher.offer_id == DbSpotOffer.id)
+        .filter(DbSpotOffer.spot_id.in_(spot_ids), DbSpotVoucher.used_at.isnot(None))
+        .group_by(DbSpotOffer.spot_id).all()
+    )
+    return saves, events, couples
+
+
 def _decorate(db: Session, spots, saved_ids=frozenset()):
     """What a list of spots carries besides the spot itself."""
+    ids = [spot.id for spot in spots]
     # The venues' promotions for couples, shown to everyone (visitors too).
-    offers = db_offers.public_offers(db, [spot.id for spot in spots])
-    partners = _partner_spot_ids(db, [spot.id for spot in spots])
+    offers = db_offers.public_offers(db, ids)
+    partners = _partner_spot_ids(db, ids)
+    saves, events, couples = _counts(db, ids)
     for spot in spots:
         spot.offer = offers.get(spot.id)
         # Partner spots: only admins get Edit / Delete (see _require_manage).
         spot.partner = spot.id in partners
         spot.saved = spot.id in saved_ids
+        spot.save_count = saves.get(spot.id, 0)
+        spot.events_count = events.get(spot.id, 0)
+        spot.couples_count = couples.get(spot.id, 0)
     return spots
 
 
@@ -353,6 +387,68 @@ def list_date_spots(
     # them); within each group, the order above.
     spots.sort(key=lambda spot: spot.offer is None)
     return spots
+
+
+FEATURED_MIN_SAVES = 2  # the automatic pick needs at least this many ♥ this week
+
+
+@router.get("/featured", response_model=Optional[FeaturedSpot])
+def spot_of_the_week(db: Session = Depends(get_db), user=Depends(optional_user)):
+    """"Spot of the week": the one an admin picked (until its date), or else
+    the most saved of the last 7 days. Null when there's neither."""
+    now = datetime.utcnow()
+    spot = (
+        db.query(DbDateSpot).options(selectinload(DbDateSpot.profile))
+        .filter(DbDateSpot.status == "published", DbDateSpot.featured_until > now)
+        .order_by(DbDateSpot.featured_until.desc()).first()
+    )
+    picked = spot is not None
+    if spot is None:
+        count = func.count(DbSpotSave.id)
+        row = (
+            db.query(DbSpotSave.spot_id, count)
+            .join(DbDateSpot, DbDateSpot.id == DbSpotSave.spot_id)
+            .filter(DbSpotSave.created_at >= now - timedelta(days=7), DbDateSpot.status == "published")
+            .group_by(DbSpotSave.spot_id)
+            .order_by(count.desc(), DbSpotSave.spot_id)
+            .first()
+        )
+        if row and row[1] >= FEATURED_MIN_SAVES:
+            spot = db.query(DbDateSpot).options(selectinload(DbDateSpot.profile)).filter(DbDateSpot.id == row[0]).first()
+    if spot is None:
+        return None
+    _decorate(db, [spot], _saved_ids(db, user))
+    return {"spot": spot, "note": spot.featured_note if picked else None, "picked": picked}
+
+
+@router.post("/{spot_id}/feature", response_model=FeaturedSpot)
+def feature_spot(spot_id: int, payload: FeatureSpotIn, db: Session = Depends(get_db),
+                 current_user: UserAuth = Depends(get_current_user)):
+    """Admin: make this the spot of the week (for `days` days), with a note.
+    Only one at a time: the previous pick ends."""
+    _require_admin(current_user)
+    spot = _get_spot(db, spot_id)
+    if spot.status != "published":
+        raise HTTPException(status_code=404, detail="That place no longer exists.")
+    now = datetime.utcnow()
+    db.query(DbDateSpot).filter(DbDateSpot.featured_until > now, DbDateSpot.id != spot.id).update(
+        {DbDateSpot.featured_until: None}, synchronize_session=False)
+    spot.featured_until = now + timedelta(days=payload.days)
+    spot.featured_note = _tidy(payload.note, 300) or None
+    db.commit()
+    db.refresh(spot)
+    _decorate(db, [spot], _saved_ids(db, current_user))
+    return {"spot": spot, "note": spot.featured_note, "picked": True}
+
+
+@router.delete("/{spot_id}/feature")
+def unfeature_spot(spot_id: int, db: Session = Depends(get_db), current_user: UserAuth = Depends(get_current_user)):
+    """Admin: no longer the spot of the week."""
+    _require_admin(current_user)
+    spot = _get_spot(db, spot_id)
+    spot.featured_until = None
+    db.commit()
+    return {"featured": False}
 
 
 @router.get("/saved", response_model=List[DateSpotDisplay])

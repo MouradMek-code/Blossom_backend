@@ -30,6 +30,7 @@ LANGUAGES = ("en", "fr", "zh", "ar")
 DEFAULT_OPEN_DAYS = 30
 DEFAULT_VALID_HOURS = 7 * 24
 MAX_PENDING_PER_SENDER = 3  # per email (form) or per venue (manager page), per day
+MAX_PUBLISHED_PER_DAY = 3  # new gifts a partner publishes itself, per day
 
 
 def _lang(value):
@@ -411,6 +412,27 @@ def manager_view(db: Session, venue: DbVenue, now: datetime = None):
             for r in requests
         ],
     }
+
+
+def publish_offer(db: Session, background_tasks: BackgroundTasks, venue: DbVenue, data: dict, now: datetime = None):
+    """A new gift from a partner's manager page: live at once - they're
+    already a trusted partner. The admins are told and can pause it."""
+    now = now or datetime.utcnow()
+    title = _text(data.get("offer_title"), 120)
+    ends_at = data.get("ends_at") or now + timedelta(days=DEFAULT_OPEN_DAYS)
+    valid_hours = data.get("valid_hours") or DEFAULT_VALID_HOURS
+    _check_offer_fields(title, data.get("max_couples"), ends_at, valid_hours, now)
+    today = db.query(func.count(DbSpotOffer.id)).filter(
+        DbSpotOffer.spot_id == venue.spot_id, DbSpotOffer.created_at > now - timedelta(days=1),
+    ).scalar() or 0
+    if today >= MAX_PUBLISHED_PER_DAY:
+        raise HTTPException(status_code=429, detail="That's a lot of new gifts for one day - try again tomorrow.")
+    offer = db_offers.create_offer(
+        db, venue.spot_id, title, _long_text(data.get("offer_details"), 500), data.get("max_couples"),
+        ends_at, valid_hours, staff_code=venue.staff_code, now=now,
+    )
+    db_push.notify_partner_offer(db, background_tasks, venue.name, title)
+    return {"id": offer["id"], "status": "published"}
 
 
 def manager_update_offer(db: Session, venue: DbVenue, offer_id: int, changes: dict, now: datetime = None):

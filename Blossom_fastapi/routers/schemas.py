@@ -531,6 +531,11 @@ class DateSpotDisplay(BaseModel):
     lng: Optional[float] = None
     # ♡ by the person asking (always false for visitors).
     saved: bool = False
+    # Social proof: how many saved it, upcoming events there, couples who
+    # used its gift at the counter.
+    save_count: int = 0
+    events_count: int = 0
+    couples_count: int = 0
 
     # Stored as "First date,Casual"; clients get a proper list.
     @field_validator("best_for", mode="before")
@@ -597,3 +602,16 @@ class FriendProfileClaim(BaseModel):
     password: str = Field(min_length=8, max_length=100)
     # The friend ticked "I'm 18+ and I accept the terms and privacy policy".
     accept_terms: bool
+
+
+class FeaturedSpot(BaseModel):
+    """"Spot of the week": picked by an admin (with a note), or else the most
+    saved spot of the last 7 days."""
+    spot: DateSpotDisplay
+    note: Optional[str] = None
+    picked: bool = False
+
+
+class FeatureSpotIn(BaseModel):
+    note: Optional[str] = Field(default=None, max_length=300)
+    days: int = Field(default=7, ge=1, le=31)

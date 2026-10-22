@@ -136,6 +136,9 @@ with engine.begin() as connection:
     connection.execute(text("ALTER TABLE date_spots ADD COLUMN IF NOT EXISTS lat DOUBLE PRECISION"))
     connection.execute(text("ALTER TABLE date_spots ADD COLUMN IF NOT EXISTS lng DOUBLE PRECISION"))
     connection.execute(text("ALTER TABLE date_spots ADD COLUMN IF NOT EXISTS geo_key VARCHAR(40)"))
+    # "Spot of the week" (routers/date_spot.py).
+    connection.execute(text("ALTER TABLE date_spots ADD COLUMN IF NOT EXISTS featured_until TIMESTAMP"))
+    connection.execute(text("ALTER TABLE date_spots ADD COLUMN IF NOT EXISTS featured_note VARCHAR(300)"))
     connection.execute(text(
         "CREATE INDEX IF NOT EXISTS ix_date_spots_status ON date_spots (status)"
     ))
