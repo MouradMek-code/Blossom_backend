@@ -128,6 +128,12 @@ TEXTS = {
         "zh": "🎉 你推荐的地点 {name} 已上线 Blossom，谢谢！",
         "ar": "🎉 مكانك {name} أصبح الآن على Blossom - شكرًا لك!",
     },
+    "profile_report": {
+        "en": "🚩 {reporter} reported {name}: {reason}",
+        "fr": "🚩 {reporter} a signalé {name} : {reason}",
+        "zh": "🚩 {reporter} 举报了 {name}：{reason}",
+        "ar": "🚩 {reporter} أبلغ عن {name}: {reason}",
+    },
     "partner_offer": {
         "en": "🎁 New gift published by {name}: {title}",
         "fr": "🎁 Nouveau cadeau publié par {name} : {title}",
@@ -326,6 +332,27 @@ def _admin_targets(db: Session, exclude_user_id=None):
         for row in db.query(DbAdminAlertToken).filter(DbAdminAlertToken.user_id.in_(admin_ids)).all():
             targets.setdefault(row.token, row.language)
     return targets
+
+
+def notify_profile_report(db: Session, background_tasks: BackgroundTasks, report):
+    """"🚩 Sara reported Tom: fake photos" to the admins, at once."""
+    targets = _admin_targets(db)
+    reason = " ".join((report.reason or "").split())
+    if len(reason) > 80:
+        reason = reason[:79] + "…"
+    _queue(background_tasks, [
+        {
+            "to": token,
+            "title": "Blossom",
+            "body": TEXTS["profile_report"][normalize_language(language)].format(
+                reporter=report.reporter_name or "?", name=report.reported_name or "?", reason=reason),
+            "data": {"type": "profile_report", "reportId": report.id},
+            "sound": "default",
+            "channelId": "default",
+            "priority": "high",
+        }
+        for token, language in targets.items()
+    ])
 
 
 def notify_partner_offer(db: Session, background_tasks: BackgroundTasks, venue_name, title):

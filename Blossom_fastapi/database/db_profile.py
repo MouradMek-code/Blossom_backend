@@ -348,6 +348,17 @@ def delete_account(db: Session, user: UserAuth):
             (DbProfileLike.liker_profile_id == profile.id) | (DbProfileLike.liked_profile_id == profile.id)
         ).delete()
 
+        # Blocks and reports point at the profile too: without this the
+        # database refused to delete anyone who had reported, been reported,
+        # blocked or been blocked. Reports keep the names (admins still see
+        # who and why); blocks go.
+        from database import db_report
+        from database.models import DbBlock
+        db_report.clear_profile(db, profile)
+        db.query(DbBlock).filter(
+            (DbBlock.blocker_profile_id == profile.id) | (DbBlock.blocked_profile_id == profile.id)
+        ).delete(synchronize_session=False)
+
         db.delete(profile)
 
     # Stop notifying this account's phones.

@@ -136,6 +136,15 @@ with engine.begin() as connection:
     connection.execute(text("ALTER TABLE date_spots ADD COLUMN IF NOT EXISTS lat DOUBLE PRECISION"))
     connection.execute(text("ALTER TABLE date_spots ADD COLUMN IF NOT EXISTS lng DOUBLE PRECISION"))
     connection.execute(text("ALTER TABLE date_spots ADD COLUMN IF NOT EXISTS geo_key VARCHAR(40)"))
+    # Reports outlive deleted accounts (their ids are cleared, the names kept),
+    # and admins mark them as handled.
+    connection.execute(text("ALTER TABLE profile_report ALTER COLUMN reporter_profile_id DROP NOT NULL"))
+    connection.execute(text("ALTER TABLE profile_report ALTER COLUMN reported_profile_id DROP NOT NULL"))
+    connection.execute(text("ALTER TABLE profile_report ADD COLUMN IF NOT EXISTS reporter_name VARCHAR(120)"))
+    connection.execute(text("ALTER TABLE profile_report ADD COLUMN IF NOT EXISTS reported_name VARCHAR(120)"))
+    connection.execute(text(
+        "ALTER TABLE profile_report ADD COLUMN IF NOT EXISTS handled BOOLEAN NOT NULL DEFAULT false"
+    ))
     # "Spot of the week" (routers/date_spot.py).
     connection.execute(text("ALTER TABLE date_spots ADD COLUMN IF NOT EXISTS featured_until TIMESTAMP"))
     connection.execute(text("ALTER TABLE date_spots ADD COLUMN IF NOT EXISTS featured_note VARCHAR(300)"))

@@ -390,6 +390,9 @@ class DbBlock(Base):
 
 
 class DbReport(Base):
+    """A member reporting another. The names are kept too: when an account is
+    deleted its id here is cleared (or the deletion would be refused), and the
+    report must still say who and why."""
     __tablename__ = "profile_report"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -397,14 +400,16 @@ class DbReport(Base):
     reporter_profile_id = Column(
         Integer,
         ForeignKey("profiles.id"),
-        nullable=False
+        nullable=True
     )
 
     reported_profile_id = Column(
         Integer,
         ForeignKey("profiles.id"),
-        nullable=False
+        nullable=True
     )
+    reporter_name = Column(String(120), nullable=True)
+    reported_name = Column(String(120), nullable=True)
 
     reason = Column(Text, nullable=False)
 
@@ -412,6 +417,9 @@ class DbReport(Base):
         DateTime,
         default=datetime.utcnow
     )
+
+    # An admin looked at it ("Done").
+    handled = Column(Boolean, nullable=False, default=False, server_default="false")
 
 class DbDateSpot(Base):
     """A place a user actually had a good date at, shared with the community."""
