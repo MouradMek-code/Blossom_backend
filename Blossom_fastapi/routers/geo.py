@@ -5,6 +5,8 @@ from functools import lru_cache
 
 from fastapi import APIRouter, HTTPException, Query
 
+from database.closed_countries import CLOSED_COUNTRY_CODES
+
 # Country and city lists for the location picker, so people choose where they
 # live instead of sharing their GPS position. Data: GeoNames (CC BY 4.0), built
 # into data/geo/ by scripts/build_geo_data.py.
@@ -26,8 +28,21 @@ def _fold(text: str) -> str:
 
 @lru_cache(maxsize=1)
 def _countries():
+    """Without the countries Blossom isn't open to (database/closed_countries.py)."""
     with open(os.path.join(_DATA_DIR, "countries.json"), encoding="utf-8") as f:
-        return json.load(f)
+        return [c for c in json.load(f) if c["code"] not in CLOSED_COUNTRY_CODES]
+
+
+@lru_cache(maxsize=1)
+def _all_country_names():
+    """{code: name} for every country, closed ones included."""
+    with open(os.path.join(_DATA_DIR, "countries.json"), encoding="utf-8") as f:
+        return {c["code"]: c["name"] for c in json.load(f)}
+
+
+def country_name(code):
+    """"FR" -> "France" (the name profiles use), or None for an unknown code."""
+    return _all_country_names().get((code or "").strip().upper())
 
 
 @lru_cache(maxsize=1)

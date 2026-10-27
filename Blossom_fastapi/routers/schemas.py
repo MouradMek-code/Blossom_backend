@@ -437,6 +437,12 @@ class VerifyOTPRequest(BaseModel):
 class BioUpdate(BaseModel):
     bio: str
 
+class DetectedLocation(BaseModel):
+    """Where the phone is, as its own map service names it (approximate)."""
+    country_code: str = Field(min_length=2, max_length=2)
+    city: Optional[str] = Field(default=None, max_length=80)
+
+
 class ReportCreate(BaseModel):
     reported_profile_id: int
     reason: str = Field(min_length=1, max_length=1000)
@@ -536,6 +542,10 @@ class DateSpotDisplay(BaseModel):
     save_count: int = 0
     events_count: int = 0
     couples_count: int = 0
+    # Every photo URL (main first) - the cards show them in turn - and the
+    # extra ones with their ids, to remove one when editing.
+    photos: List[str] = []
+    gallery: List[dict] = []
 
     # Stored as "First date,Casual"; clients get a proper list.
     @field_validator("best_for", mode="before")

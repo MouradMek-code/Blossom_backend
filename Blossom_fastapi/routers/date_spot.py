@@ -17,7 +17,7 @@ from auth.oauth2 import get_current_user
 from database import db_message, db_offers, db_profile, db_push, db_spot_geo
 from database.database import get_db
 from database.models import (
-    DbDateSpot, DbEvent, DbMatch, DbProfile, DbSpotOffer, DbSpotSave, DbSpotVoucher, DbUser, DbVenue,
+    DbDateSpot, DbEvent, DbMatch, DbProfile, DbSpotOffer, DbSpotPhoto, DbSpotSave, DbSpotVoucher, DbUser, DbVenue,
 )
 from database.starter_spots import STARTER_CITY, STARTER_COUNTRY, STARTER_SPOTS
 from routers.analytics import optional_user
@@ -363,7 +363,7 @@ def list_date_spots(
     """Public listing so the city pages are browsable (and indexable).
     Only published spots - members' suggestions wait for an admin. Logged in,
     each spot says whether they saved it (♡)."""
-    query = db.query(DbDateSpot).options(selectinload(DbDateSpot.profile)).filter(
+    query = db.query(DbDateSpot).options(selectinload(DbDateSpot.profile), selectinload(DbDateSpot.extra_photos)).filter(
         DbDateSpot.status == "published")
     if country:
         query = query.filter(DbDateSpot.country == country)
@@ -398,7 +398,7 @@ def spot_of_the_week(db: Session = Depends(get_db), user=Depends(optional_user))
     the most saved of the last 7 days. Null when there's neither."""
     now = datetime.utcnow()
     spot = (
-        db.query(DbDateSpot).options(selectinload(DbDateSpot.profile))
+        db.query(DbDateSpot).options(selectinload(DbDateSpot.profile), selectinload(DbDateSpot.extra_photos))
         .filter(DbDateSpot.status == "published", DbDateSpot.featured_until > now)
         .order_by(DbDateSpot.featured_until.desc()).first()
     )
@@ -414,7 +414,7 @@ def spot_of_the_week(db: Session = Depends(get_db), user=Depends(optional_user))
             .first()
         )
         if row and row[1] >= FEATURED_MIN_SAVES:
-            spot = db.query(DbDateSpot).options(selectinload(DbDateSpot.profile)).filter(DbDateSpot.id == row[0]).first()
+            spot = db.query(DbDateSpot).options(selectinload(DbDateSpot.profile), selectinload(DbDateSpot.extra_photos)).filter(DbDateSpot.id == row[0]).first()
     if spot is None:
         return None
     _decorate(db, [spot], _saved_ids(db, user))
@@ -459,7 +459,7 @@ def my_saved_spots(db: Session = Depends(get_db), current_user: UserAuth = Depen
         return []
     spots = (
         db.query(DbDateSpot)
-        .options(selectinload(DbDateSpot.profile))
+        .options(selectinload(DbDateSpot.profile), selectinload(DbDateSpot.extra_photos))
         .join(DbSpotSave, DbSpotSave.spot_id == DbDateSpot.id)
         .filter(DbSpotSave.profile_id == profile_id, DbDateSpot.status == "published")
         .order_by(DbSpotSave.created_at.desc(), DbSpotSave.id.desc())
@@ -863,7 +863,7 @@ def list_suggestions(db: Session = Depends(get_db), current_user: UserAuth = Dep
     refusing deletes it (DELETE /{spot_id})."""
     _require_admin(current_user)
     return (
-        db.query(DbDateSpot).options(selectinload(DbDateSpot.profile))
+        db.query(DbDateSpot).options(selectinload(DbDateSpot.profile), selectinload(DbDateSpot.extra_photos))
         .filter(DbDateSpot.status == "pending")
         .order_by(DbDateSpot.created_at)
         .all()
@@ -898,9 +898,11 @@ def delete_date_spot(
     spot = _get_spot(db, spot_id)
     _require_manage(db, spot, current_user, "You can only remove places you added.")
 
-    if spot.public_id:
+    for public_id in [spot.public_id, *(p.public_id for p in spot.extra_photos)]:
+        if not public_id:
+            continue
         try:
-            cloudinary.uploader.destroy(spot.public_id)
+            cloudinary.uploader.destroy(public_id)
         except Exception:
             # The row still goes away even if the CDN cleanup fails.
             pass
@@ -908,3 +910,54 @@ def delete_date_spot(
     db.delete(spot)
     db.commit()
     return {"detail": "Place removed"}
+
+
+MAX_EXTRA_PHOTOS = 6
+
+
+@router.post("/{spot_id}/photos", response_model=DateSpotDisplay)
+def add_spot_photo(
+    spot_id: int,
+    image: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: UserAuth = Depends(get_current_user),
+):
+    """One more photo (up to 6 besides the main one). A spot with no main
+    photo yet gets this one as its main photo."""
+    spot = _get_spot(db, spot_id)
+    _require_manage(db, spot, current_user, "You can only edit places you added.")
+    if spot.image_url and len(spot.extra_photos) >= MAX_EXTRA_PHOTOS:
+        raise HTTPException(status_code=400, detail=f"Up to {MAX_EXTRA_PHOTOS + 1} photos per place.")
+    url, public_id = _upload_image(image)
+    if not spot.image_url:
+        spot.image_url, spot.public_id = url, public_id
+    else:
+        db.add(DbSpotPhoto(spot_id=spot.id, image_url=url, public_id=public_id))
+    db.commit()
+    db.refresh(spot)
+    return _with_partner(db, spot)
+
+
+@router.delete("/{spot_id}/photos/{photo_id}", response_model=DateSpotDisplay)
+def remove_spot_photo(
+    spot_id: int,
+    photo_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserAuth = Depends(get_current_user),
+):
+    """Remove one of the extra photos (the main one is replaced, not removed)."""
+    spot = _get_spot(db, spot_id)
+    _require_manage(db, spot, current_user, "You can only edit places you added.")
+    photo = db.get(DbSpotPhoto, photo_id)
+    if not photo or photo.spot_id != spot.id:
+        raise HTTPException(status_code=404, detail="Photo not found.")
+    public_id = photo.public_id
+    db.delete(photo)
+    db.commit()
+    if public_id:
+        try:
+            cloudinary.uploader.destroy(public_id)
+        except Exception:
+            pass  # the photo is gone from the place either way
+    db.refresh(spot)
+    return _with_partner(db, spot)

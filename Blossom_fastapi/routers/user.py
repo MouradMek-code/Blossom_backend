@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session, selectinload
 import sib_api_v3_sdk
 from sib_api_v3_sdk.rest import ApiException
 from routers.schemas import VerifyOTPRequest, ForgotPasswordRequest, ResetPasswordRequest
-from database.models import DbUser, DbProfile, DbMatch, DbProfileLike
+from database.models import DbUser, DbProfile, DbMatch, DbProfileLike, DbProfilePhoto
 from datetime import datetime, timedelta
 from sqlalchemy import func
 from database import db_user, db_profile, db_message
@@ -25,6 +25,44 @@ router = APIRouter(
     prefix="/user",
 )
 import re
+
+# Email codes (sign-up and password reset): 5 wrong guesses and a code is
+# spent - a 6-digit code could otherwise be found by trying them all - and at
+# most 6 codes an hour per address, so it can't be renewed endlessly either
+# (nor used to flood someone's inbox).
+MAX_CODE_TRIES = 5
+MAX_CODES_PER_HOUR = 6
+CODE_LIFETIME = timedelta(minutes=10)
+SIGNUP_CODE_ERRORS = ("OTP not found", "OTP expired", "Invalid OTP")
+RESET_CODE_ERRORS = ("Reset code not found", "Reset code expired", "Invalid reset code")
+
+
+def _same_email(email):
+    return func.lower(OTP.email) == (email or "").strip().lower()
+
+
+def _too_many_codes(db: Session, email) -> bool:
+    # Codes live 10 minutes: one sent in the last hour expires after now - 50 min.
+    since = datetime.now() + CODE_LIFETIME - timedelta(hours=1)
+    return db.query(OTP).filter(_same_email(email), OTP.expires_at > since).count() >= MAX_CODES_PER_HOUR
+
+
+def _check_code(db: Session, email, code, errors):
+    """The latest code sent to this email, if `code` is it (else an error;
+    a wrong code counts as a try)."""
+    not_found, expired, invalid = errors
+    record = db.query(OTP).filter(_same_email(email)).order_by(OTP.id.desc()).first()
+    if not record:
+        raise HTTPException(400, not_found)
+    if record.expires_at < datetime.now():
+        raise HTTPException(400, expired)
+    if (record.attempts or 0) >= MAX_CODE_TRIES:
+        raise HTTPException(400, "Too many wrong codes. Please ask for a new one.")
+    if record.code != (code or "").strip():
+        record.attempts = (record.attempts or 0) + 1
+        db.commit()
+        raise HTTPException(400, invalid)
+    return record
 @router.post('', response_model=UserDisplay)
 def create_user(request:UserBase,db:Session = Depends(get_db)):
 
@@ -68,7 +106,10 @@ def get_badges(db: Session = Depends(get_db), current_user: UserAuth = Depends(g
     is_admin = bool(getattr(current_user, "is_admin", False))
     profile_id = db.query(DbProfile.id).filter(DbProfile.user_id == current_user.id).scalar()
     if profile_id is None:
-        return {"has_profile": False, "is_admin": is_admin, "matches": 0, "likes": 0, "messages": 0}
+        return {"has_profile": False, "has_photo": False, "is_admin": is_admin, "matches": 0, "likes": 0, "messages": 0}
+    # No photo yet (sign-up stopped at the photo step): the apps send them back
+    # there - nobody sees a profile without a photo in Browse.
+    has_photo = db.query(DbProfilePhoto.id).filter(DbProfilePhoto.profile_id == profile_id).first() is not None
 
     # One query gives both the unseen-match count and the matched ids that
     # the likes badge excludes (same rules as /matches/unseen_count and
@@ -91,6 +132,7 @@ def get_badges(db: Session = Depends(get_db), current_user: UserAuth = Depends(g
 
     return {
         "has_profile": True,
+        "has_photo": has_photo,
         "is_admin": is_admin,
         "matches": unseen_matches,
         "likes": likes_query.scalar() or 0,
@@ -406,7 +448,7 @@ def admin_delete_user(user_id: int, db: Session = Depends(get_db), _: UserAuth =
 @router.post("/forgot_password")
 async def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(get_db)):
     user = db.query(DbUser).filter(DbUser.email == request.email).first()
-    if not user:
+    if not user or _too_many_codes(db, request.email):
         # Don't reveal whether the email is registered.
         return {"message": "If that email exists, a reset code has been sent."}
 
@@ -427,16 +469,7 @@ async def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(
 
 @router.post("/reset_password")
 def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db)):
-    record = db.query(OTP).filter(
-        OTP.email == request.email
-    ).order_by(OTP.id.desc()).first()
-
-    if not record:
-        raise HTTPException(400, "Reset code not found")
-    if record.expires_at < datetime.now():
-        raise HTTPException(400, "Reset code expired")
-    if record.code != request.otp:
-        raise HTTPException(400, "Invalid reset code")
+    _check_code(db, request.email, request.otp, RESET_CODE_ERRORS)
 
     user = db.query(DbUser).filter(DbUser.email == request.email).first()
     if not user:
@@ -470,6 +503,8 @@ async def send_email_verification(request:UserBase,db:Session = Depends(get_db))
         db_phone = db.query(DbUser).filter(DbUser.phone_number == request.phone_number).first()
         if db_phone:
             raise HTTPException(status_code=409, detail="An account with this phone number already exists.")
+    if _too_many_codes(db, request.email):
+        raise HTTPException(status_code=429, detail="Too many codes were sent to this email. Please try again later.")
     phone_number=request.phone_number
     email = request.email
     otp = str(random.randint(100000, 999999))
@@ -502,6 +537,8 @@ async def resend_email_verification(email: str, phone_number: str, db: Session =
     # a new code to it.
     if db.query(DbUser).filter(DbUser.email == email).first():
         raise HTTPException(status_code=409, detail="An account with this email already exists. Try logging in instead.")
+    if _too_many_codes(db, email):
+        raise HTTPException(status_code=429, detail="Too many codes were sent to this email. Please try again later.")
     otp = str(random.randint(100000, 999999))
     clean_phone = re.sub(r'[^\d+]', '', phone_number.replace('tel:', ''))
     result = await send_email_otp(email, clean_phone, otp)
@@ -520,22 +557,12 @@ async def resend_email_verification(email: str, phone_number: str, db: Session =
 @router.post("/verify-email")
 def verify_otp_email(request:VerifyOTPRequest,db:Session = Depends(get_db)):
 
-    record = db.query(OTP).filter(
-        OTP.email == request.email
-    ).order_by(OTP.id.desc()).first()
+    record = _check_code(db, request.email, request.otp, SIGNUP_CODE_ERRORS)
 
-    if not record:
-        raise HTTPException(400, "OTP not found")
-
-    if record.expires_at < datetime.now():
-        raise HTTPException(400, "OTP expired")
-
-    if record.code != request.otp:
-        raise HTTPException(400, "Invalid OTP")
-
-    # Used: clear this person's codes - only theirs. It used to empty the whole
-    # table, so anyone else signing up at the same moment got "OTP not found".
-    db.query(OTP).filter(OTP.email == request.email).delete()
+    # Remembered: POST /user only creates an account for an email confirmed
+    # here (within 30 minutes). This person's older codes go - only theirs.
+    record.verified_at = datetime.now()
+    db.query(OTP).filter(_same_email(request.email), OTP.id != record.id).delete(synchronize_session=False)
     db.commit()
     return {"message": "Email verified"}
 

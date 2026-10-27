@@ -145,6 +145,9 @@ with engine.begin() as connection:
     connection.execute(text(
         "ALTER TABLE profile_report ADD COLUMN IF NOT EXISTS handled BOOLEAN NOT NULL DEFAULT false"
     ))
+    # Email codes: confirmed (an account needs that) and wrong guesses.
+    connection.execute(text("ALTER TABLE otps ADD COLUMN IF NOT EXISTS verified_at TIMESTAMP"))
+    connection.execute(text("ALTER TABLE otps ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0"))
     # "Spot of the week" (routers/date_spot.py).
     connection.execute(text("ALTER TABLE date_spots ADD COLUMN IF NOT EXISTS featured_until TIMESTAMP"))
     connection.execute(text("ALTER TABLE date_spots ADD COLUMN IF NOT EXISTS featured_note VARCHAR(300)"))

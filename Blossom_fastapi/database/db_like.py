@@ -12,6 +12,11 @@ def like_profile(
     liked_profile_id: int
 ):
     profile_db = db.query(DbProfile).filter(DbProfile.user_id == current_user_id).first()
+    if not profile_db:
+        raise HTTPException(status_code=404, detail="Create your profile first.")
+    # No likes from a profile nobody can see (Browse needs a photo too).
+    if not profile_db.photos:
+        raise HTTPException(status_code=403, detail="Add a photo to your profile first.")
 
     if db_block.is_blocked_either_direction(db, profile_db.id, liked_profile_id):
         raise HTTPException(status_code=403, detail="You can't like a blocked profile")

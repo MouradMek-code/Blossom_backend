@@ -29,6 +29,8 @@ def clean_connection_type(value) -> str:
 
 
 def create_profile(db:Session,request:ProfileBase,user:UserAuth):
+    from database.closed_countries import check_country
+    check_country(request.country)
     connection_type = clean_connection_type(request.connection_type)
     relationship_goal = request.relationship_goal
     # Language exchange is about friendship; that question is skipped for them.
@@ -144,6 +146,9 @@ def get_all_profiles(db: Session, user: UserAuth):
         .filter(
             DbProfile.id.notin_(excluded_profile_ids),
             DbProfile.connection_type.in_(compatible),
+            # Only profiles with a photo: someone who stopped at the photo
+            # step (or made a profile without the apps) isn't shown.
+            DbProfile.photos.any(),
         )
         .all()
     )

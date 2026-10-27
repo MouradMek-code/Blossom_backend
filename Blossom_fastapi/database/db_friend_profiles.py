@@ -140,6 +140,8 @@ def create(db: Session, admin: DbUser, data) -> dict:
     city, country = _clean(data.city, 50), _clean(data.country, 50)
     if not city or not country:
         raise HTTPException(status_code=400, detail="Please say which city and country your friend lives in.")
+    from database.closed_countries import check_country
+    check_country(country)
 
     # Every question, as at sign-up (where none can be skipped). Browse even
     # breaks on some empty answers (has_pets), so this isn't just tidiness.

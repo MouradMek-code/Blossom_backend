@@ -354,6 +354,10 @@ class OTP(Base):
         email = Column(String)
         code = Column(String)
         expires_at = Column(DateTime)
+        # Set by /user/verify-email; POST /user needs it (routers/user.py).
+        verified_at = Column(DateTime, nullable=True)
+        # Wrong guesses: 5 and the code is spent.
+        attempts = Column(Integer, nullable=False, default=0, server_default="0")
 
 
 class DbBlock(Base):
@@ -450,6 +454,21 @@ class DbDateSpot(Base):
     # the admin's few words about it.
     featured_until = Column(DateTime, nullable=True)
     featured_note = Column(String(300), nullable=True)
+
+    # More photos besides image_url (the main one); the cards show them in turn.
+    extra_photos = relationship(
+        "DbSpotPhoto", order_by="DbSpotPhoto.id", cascade="all, delete-orphan", passive_deletes=True,
+    )
+
+    @property
+    def photos(self):
+        """Every photo URL, the main one first."""
+        return [url for url in [self.image_url, *(p.image_url for p in self.extra_photos)] if url]
+
+    @property
+    def gallery(self):
+        """The extra photos, with their ids (to remove one)."""
+        return [{"id": p.id, "image_url": p.image_url} for p in self.extra_photos]
 
     # Vibe tag, drawn from the same list as a profile's first_date_preference
     # so spots and people speak the same language.
@@ -769,3 +788,14 @@ class DbSpotSave(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     __table_args__ = (UniqueConstraint("profile_id", "spot_id", name="uq_spot_save"),)
+
+
+class DbSpotPhoto(Base):
+    """One more photo of a date spot (the main one is date_spots.image_url)."""
+    __tablename__ = "date_spot_photos"
+
+    id = Column(Integer, primary_key=True, index=True)
+    spot_id = Column(Integer, ForeignKey("date_spots.id", ondelete="CASCADE"), nullable=False, index=True)
+    image_url = Column(String(500), nullable=False)
+    public_id = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)

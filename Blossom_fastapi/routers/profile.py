@@ -7,7 +7,7 @@ from database import db_profile,db_message,db_push
 from database.models import DbProfile,DbProfilePhoto
 from auth.oauth2 import get_current_user
 from database.database import get_db
-from routers.schemas import ProfileBase, ProfileDisplay, UserAuth,ProfileDisplayforPhoto,BioUpdate,ConnectionUpdate
+from routers.schemas import ProfileBase, ProfileDisplay, UserAuth,ProfileDisplayforPhoto,BioUpdate,ConnectionUpdate,DetectedLocation
 from routers.schemas import UserAuth,ProfilePhotoDisplay
 import cloudinary.uploader
 from datetime import datetime
@@ -104,6 +104,32 @@ def _notify_if_just_finished(db: Session, background_tasks: BackgroundTasks, pro
         db.refresh(profile)
         db_push.notify_new_profile(db, background_tasks, profile)
 
+@router.post("/location")
+def detected_location(payload: DetectedLocation, db: Session = Depends(get_db),
+                      current_user: UserAuth = Depends(get_current_user)):
+    """The app, after the profile exists: where the phone is now (approximate,
+    with the member's permission). The profile's city and country follow it.
+    In a country Blossom isn't open to (India), the account is removed."""
+    from database.closed_countries import CLOSED_COUNTRY_CODES
+    from routers.geo import country_name
+
+    code = payload.country_code.strip().upper()
+    profile = db.query(DbProfile).filter(DbProfile.user_id == current_user.id).first()
+    if profile is None:
+        return {"removed": False, "updated": False}
+    if code in CLOSED_COUNTRY_CODES:
+        db_profile.delete_account(db, current_user)
+        return {"removed": True, "updated": False}
+    country = country_name(code)
+    city = " ".join((payload.city or "").split())[:50]
+    if not country or not city:
+        return {"removed": False, "updated": False}
+    if profile.city == city and profile.country == country:
+        return {"removed": False, "updated": False, "city": city, "country": country}
+    db_profile.update_profile(db, current_user, city, country)
+    return {"removed": False, "updated": True, "city": city, "country": country}
+
+
 @router.put("/update_city_country", response_model=ProfileDisplay)
 def update_location(city:str,country:str,db:Session = Depends(get_db),current_user: UserAuth=Depends(get_current_user)):
     city = " ".join(city.split())
@@ -111,6 +137,8 @@ def update_location(city:str,country:str,db:Session = Depends(get_db),current_us
     # Both columns are VARCHAR(50); reject cleanly instead of a database error.
     if not city or not country or len(city) > 50 or len(country) > 50:
         raise HTTPException(status_code=400, detail="Please choose a country and a city.")
+    from database.closed_countries import check_country
+    check_country(country)
     result=db_profile.update_profile(db,current_user,city,country)
     if result is None:
         raise HTTPException(status_code=404,detail="Profiles still doesn't exist")
