@@ -278,6 +278,8 @@ class ProfileDisplay(BaseModel):
     # Browse only: this person already liked the viewer. Clients put them at
     # the front of the deck with a "Likes you" tag. False everywhere else.
     likes_you: bool = False
+    # Own profile only (GET /profile): on a break, hidden from Browse.
+    paused: bool = False
     # No `user` here: it put every member's username and email into Browse /
     # Matches / Likes You responses (a privacy leak), and loading it cost one
     # extra database query per profile. No client uses it.
@@ -625,3 +627,8 @@ class FeaturedSpot(BaseModel):
 class FeatureSpotIn(BaseModel):
     note: Optional[str] = Field(default=None, max_length=300)
     days: int = Field(default=7, ge=1, le=31)
+
+
+class PauseUpdate(BaseModel):
+    """"Take a break": true hides the profile from Browse, false shows it again."""
+    paused: bool

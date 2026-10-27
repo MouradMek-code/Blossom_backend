@@ -7,7 +7,7 @@ from database import db_profile,db_message,db_push
 from database.models import DbProfile,DbProfilePhoto
 from auth.oauth2 import get_current_user
 from database.database import get_db
-from routers.schemas import ProfileBase, ProfileDisplay, UserAuth,ProfileDisplayforPhoto,BioUpdate,ConnectionUpdate,DetectedLocation
+from routers.schemas import ProfileBase, ProfileDisplay, UserAuth,ProfileDisplayforPhoto,BioUpdate,ConnectionUpdate,DetectedLocation,PauseUpdate
 from routers.schemas import UserAuth,ProfilePhotoDisplay
 import cloudinary.uploader
 from datetime import datetime
@@ -39,6 +39,7 @@ def read_profile(current_user:UserAuth=Depends(get_current_user),db:Session=Depe
 
     if result is None:
         raise HTTPException(status_code=404,detail="Profile still doesn't exist")
+    result.paused = result.paused_at is not None
     return result
 @router.get("/profiles/matched", response_model=List[ProfileDisplay])
 def read_profile_matched(current_user:UserAuth=Depends(get_current_user),db:Session=Depends(get_db)):
@@ -158,6 +159,14 @@ def update_connection(request: ConnectionUpdate, db: Session = Depends(get_db), 
     if result is None:
         raise HTTPException(status_code=404, detail="Profile still doesn't exist")
     return result
+
+@router.put("/pause")
+def update_pause(request: PauseUpdate, db: Session = Depends(get_db), current_user: UserAuth = Depends(get_current_user)):
+    """"Take a break": hidden from Browse (matches, chats and photos stay)."""
+    paused = db_profile.set_paused(db, current_user, request.paused)
+    if paused is None:
+        raise HTTPException(status_code=404, detail="Profile still doesn't exist")
+    return {"paused": paused}
 
 @router.delete("/image/{photo_id}")
 def delete_image(photo_id:int,db:Session = Depends(get_db),current_user: UserAuth=Depends(get_current_user)):

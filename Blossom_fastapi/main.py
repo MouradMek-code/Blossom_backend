@@ -147,6 +147,8 @@ with engine.begin() as connection:
     ))
     # Email codes: confirmed (an account needs that) and wrong guesses.
     connection.execute(text("ALTER TABLE otps ADD COLUMN IF NOT EXISTS verified_at TIMESTAMP"))
+    # "Take a break" (PUT /profile/pause).
+    connection.execute(text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS paused_at TIMESTAMP"))
     connection.execute(text("ALTER TABLE otps ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0"))
     # "Spot of the week" (routers/date_spot.py).
     connection.execute(text("ALTER TABLE date_spots ADD COLUMN IF NOT EXISTS featured_until TIMESTAMP"))

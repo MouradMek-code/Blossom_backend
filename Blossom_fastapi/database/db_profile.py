@@ -149,6 +149,8 @@ def get_all_profiles(db: Session, user: UserAuth):
             # Only profiles with a photo: someone who stopped at the photo
             # step (or made a profile without the apps) isn't shown.
             DbProfile.photos.any(),
+            # Nor anyone taking a break.
+            DbProfile.paused_at.is_(None),
         )
         .all()
     )
@@ -186,6 +188,19 @@ def update_profile(db:Session,user:UserAuth,city:str,country:str):
     })
     db.commit()
     return profile_db.first()
+
+def set_paused(db: Session, user: UserAuth, paused: bool):
+    """"Take a break" on or off; None when there's no profile yet."""
+    profile = db.query(DbProfile).filter(DbProfile.user_id == user.id).first()
+    if not profile:
+        return None
+    if paused and profile.paused_at is None:
+        profile.paused_at = datetime.now()
+    elif not paused:
+        profile.paused_at = None
+    db.commit()
+    return profile.paused_at is not None
+
 
 def update_connection_type(db: Session, user: UserAuth, value: str):
     """Dating, language exchange or both. Switching to language exchange also

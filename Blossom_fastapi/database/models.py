@@ -116,6 +116,9 @@ class DbProfile(Base):
     connection_type = Column(String(20), nullable=False, default="both", server_default="both")
     # When sign-up was finished (2nd photo) - the admins are notified then, once.
     completed_at = Column(DateTime, nullable=True)
+    # "Take a break": since when the owner hid the profile from Browse (None =
+    # visible). Matches, chats and photos stay.
+    paused_at = Column(DateTime, nullable=True)
 
     # Personality
     personality_type = Column(String(50))
