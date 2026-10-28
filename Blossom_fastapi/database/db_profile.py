@@ -225,6 +225,11 @@ def update_bio(db:Session,user:UserAuth,bio:str):
     db.commit()
     return profile_db.first()
 
+# Sign-up asks for 2 photos. Deleting them afterwards left profiles with none
+# (how photo-less profiles kept appearing), so a profile never goes below 2.
+MIN_PROFILE_PHOTOS = 2
+
+
 def delete_profile_photo(db:Session,user:UserAuth,photo_id:int):
 
     profile = db.query(DbProfile).filter(DbProfile.user_id == user.id).first()
@@ -238,6 +243,13 @@ def delete_profile_photo(db:Session,user:UserAuth,photo_id:int):
 
     if not photo:
         return None
+
+    count = db.query(DbProfilePhoto).filter(DbProfilePhoto.profile_id == profile.id).count()
+    if count <= MIN_PROFILE_PHOTOS:
+        raise HTTPException(
+            status_code=400,
+            detail="Keep at least 2 photos on your profile. To change this one, add a new photo first, then remove it.",
+        )
 
     if photo.public_id:
         try:

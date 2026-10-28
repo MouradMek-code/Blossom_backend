@@ -19,7 +19,7 @@ import os
 load_dotenv()
 
 BREVO_API_KEY = os.getenv("BREVO_API_KEY")
-import random
+import secrets
 router = APIRouter(
     tags=["user"],
     prefix="/user",
@@ -35,6 +35,12 @@ MAX_CODES_PER_HOUR = 6
 CODE_LIFETIME = timedelta(minutes=10)
 SIGNUP_CODE_ERRORS = ("OTP not found", "OTP expired", "Invalid OTP")
 RESET_CODE_ERRORS = ("Reset code not found", "Reset code expired", "Invalid reset code")
+
+
+def _new_code() -> str:
+    """6 digits from the operating system's secure generator. `random` (used
+    before) is predictable once enough of its output has been seen."""
+    return str(secrets.randbelow(900000) + 100000)
 
 
 def _same_email(email):
@@ -452,7 +458,7 @@ async def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(
         # Don't reveal whether the email is registered.
         return {"message": "If that email exists, a reset code has been sent."}
 
-    otp = str(random.randint(100000, 999999))
+    otp = _new_code()
 
     db_otp = OTP(
         phone_number=user.phone_number,
@@ -507,7 +513,7 @@ async def send_email_verification(request:UserBase,db:Session = Depends(get_db))
         raise HTTPException(status_code=429, detail="Too many codes were sent to this email. Please try again later.")
     phone_number=request.phone_number
     email = request.email
-    otp = str(random.randint(100000, 999999))
+    otp = _new_code()
     phone_number = phone_number.replace("tel:", "")
     phone_number = re.sub(r"[^\d+]", "", phone_number)
     result=await send_email_otp(email,phone_number, otp)
@@ -539,7 +545,7 @@ async def resend_email_verification(email: str, phone_number: str, db: Session =
         raise HTTPException(status_code=409, detail="An account with this email already exists. Try logging in instead.")
     if _too_many_codes(db, email):
         raise HTTPException(status_code=429, detail="Too many codes were sent to this email. Please try again later.")
-    otp = str(random.randint(100000, 999999))
+    otp = _new_code()
     clean_phone = re.sub(r'[^\d+]', '', phone_number.replace('tel:', ''))
     result = await send_email_otp(email, clean_phone, otp)
     db_otp = OTP(
