@@ -119,6 +119,14 @@ class DbProfile(Base):
     # "Take a break": since when the owner hid the profile from Browse (None =
     # visible). Matches, chats and photos stay.
     paused_at = Column(DateTime, nullable=True)
+    # The ✓ badge: when an admin approved the member's selfie
+    # (database/db_verification.py), and the pose asked for the next selfie.
+    verified_at = Column(DateTime, nullable=True)
+    verification_pose = Column(String(20), nullable=True)
+
+    @property
+    def verified(self):
+        return self.verified_at is not None
 
     # Personality
     personality_type = Column(String(50))
@@ -802,3 +810,19 @@ class DbSpotPhoto(Base):
     image_url = Column(String(500), nullable=False)
     public_id = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class DbVerification(Base):
+    """A selfie sent for the ✓ badge, copying the pose the server picked. The
+    photo itself is deleted once an admin has decided; the result stays."""
+    __tablename__ = "profile_verifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    profile_id = Column(Integer, ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    pose = Column(String(20), nullable=False)
+    image_url = Column(String(500), nullable=True)
+    public_id = Column(String(255), nullable=True)
+    status = Column(String(10), nullable=False, default="pending", index=True)  # pending | approved | rejected
+    reason = Column(String(20), nullable=True)  # why it was rejected: pose | face | blurry
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    reviewed_at = Column(DateTime, nullable=True)

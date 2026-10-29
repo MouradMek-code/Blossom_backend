@@ -81,6 +81,17 @@ def forget_member_visits(
     return db_analytics.forget_member_visits(db, tz_offset)
 
 
+@router.delete("/admin/tracking")
+def delete_all_tracking(
+    db: Session = Depends(get_db),
+    current_user: UserAuth = Depends(get_current_user),
+):
+    """Admins only (the website's dashboard): delete every visit and page seen."""
+    if not getattr(current_user, "is_admin", False):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return {"deleted": db_analytics.delete_all_tracking(db)}
+
+
 @router.get("/day")
 def get_day(
     day: Optional[date] = Query(None, description="YYYY-MM-DD in the admin's time zone; today when empty"),

@@ -284,6 +284,8 @@ class ProfileDisplay(BaseModel):
     likes_you: bool = False
     # Own profile only (GET /profile): on a break, hidden from Browse.
     paused: bool = False
+    # The ✓ badge: the selfie was checked by the Blossom team.
+    verified: bool = False
     # No `user` here: it put every member's username and email into Browse /
     # Matches / Likes You responses (a privacy leak), and loading it cost one
     # extra database query per profile. No client uses it.

@@ -101,6 +101,15 @@ def forget_member_visits(db: Session, tz_offset_minutes: int = 0, now: datetime 
     return {"deleted": deleted, "kept_from": cutoff.isoformat() + "Z"}
 
 
+def delete_all_tracking(db: Session) -> int:
+    """Admin, on request: every visit and every page seen, members and
+    visitors. Counting starts again from zero. Returns how many visits."""
+    db.query(DbVisitPage).delete(synchronize_session=False)
+    deleted = db.query(DbVisit).delete(synchronize_session=False)
+    db.commit()
+    return deleted
+
+
 def _add_page(db: Session, visit: DbVisit, path, now: datetime):
     """Note the page seen - not again when it's the one already noted (a
     reload, the app coming back, a keep-alive)."""

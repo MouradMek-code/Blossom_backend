@@ -387,6 +387,8 @@ def delete_account(db: Session, user: UserAuth):
         from database import db_report
         from database.models import DbBlock
         db_report.clear_profile(db, profile)
+        from database import db_verification
+        db_verification.clear_profile(db, profile)
         db.query(DbBlock).filter(
             (DbBlock.blocker_profile_id == profile.id) | (DbBlock.blocked_profile_id == profile.id)
         ).delete(synchronize_session=False)

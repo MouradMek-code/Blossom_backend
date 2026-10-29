@@ -146,6 +146,24 @@ TEXTS = {
         "zh": "🏪 新的合作申请：{name} - {title}",
         "ar": "🏪 طلب شراكة جديد: {name} - {title}",
     },
+    "verification_request": {
+        "en": "✓ {name} sent a selfie to get verified",
+        "fr": "✓ {name} a envoyé un selfie pour être vérifié(e)",
+        "zh": "✓ {name} 发送了认证自拍",
+        "ar": "✓ أرسل {name} صورة سيلفي للتحقق",
+    },
+    "verification_approved": {
+        "en": "✓ You're verified! Your profile now shows the badge.",
+        "fr": "✓ Vous êtes vérifié(e) ! Votre profil affiche maintenant le badge.",
+        "zh": "✓ 你已通过认证！你的资料现在会显示认证标志。",
+        "ar": "✓ تم التحقق منك! يظهر الشارة الآن على ملفك الشخصي.",
+    },
+    "verification_rejected": {
+        "en": "Your verification selfie wasn't approved - tap to try again with a new pose.",
+        "fr": "Votre selfie de vérification n'a pas été validé - touchez pour réessayer avec une nouvelle pose.",
+        "zh": "你的认证自拍未通过，点此用新的姿势再试一次。",
+        "ar": "لم تتم الموافقة على صورة التحقق - اضغط للمحاولة مجددًا بوضعية جديدة.",
+    },
     "new_profile": {
         "en": "🌱 New profile: {name}",
         "fr": "🌱 Nouveau profil : {name}",
@@ -492,6 +510,28 @@ def notify_business_message(db: Session, background_tasks: BackgroundTasks, mess
         }
         for token, language in _admin_targets(db).items()
     ])
+
+
+def notify_verification_request(db: Session, background_tasks: BackgroundTasks, profile: DbProfile):
+    """"✓ Sara sent a selfie to get verified" to the admins."""
+    _queue(background_tasks, [
+        {
+            "to": token,
+            "title": "Blossom",
+            "body": TEXTS["verification_request"][normalize_language(language)].format(name=profile.first_name),
+            "data": {"type": "verification_request", "profileId": profile.id},
+            "sound": "default",
+            "channelId": "default",
+            "priority": "high",
+        }
+        for token, language in _admin_targets(db, exclude_user_id=profile.user_id).items()
+    ])
+
+
+def notify_verification_result(db: Session, background_tasks: BackgroundTasks, profile: DbProfile, approved: bool):
+    """The member: verified, or "try again with a new pose"."""
+    kind = "verification_approved" if approved else "verification_rejected"
+    _queue(background_tasks, _messages_for_profile(db, profile.id, kind, profile.first_name, {"type": "verification"}))
 
 
 def notify_new_profile(db: Session, background_tasks: BackgroundTasks, profile: DbProfile):
