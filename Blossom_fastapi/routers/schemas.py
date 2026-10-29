@@ -194,6 +194,10 @@ class ProfileBase(BaseModel):
     # "dating", "language" or "both"; missing means "both".
     connection_type: Optional[str] = None
 
+    # The phone's / browser's time zone (e.g. "Europe/Paris"): checked against
+    # the countries Blossom isn't open to, never stored.
+    timezone: Optional[str] = None
+
 
 
 class ProfileBaseLanguage(BaseModel):

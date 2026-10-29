@@ -19,6 +19,16 @@ def _fold(value) -> str:
     return " ".join("".join(ch for ch in text if not unicodedata.combining(ch)).lower().split())
 
 
+# The time zones of those countries: a phone or browser there is set to one
+# (Asia/Calcutta is the old name). Sent with a new profile - no permission
+# needed, unlike GPS.
+CLOSED_TIMEZONES = frozenset({"asia/kolkata", "asia/calcutta"})
+
+
+def is_closed_timezone(timezone) -> bool:
+    return str(timezone or "").strip().lower() in CLOSED_TIMEZONES
+
+
 def is_closed(country) -> bool:
     folded = _fold(country)
     return folded in CLOSED_COUNTRY_NAMES or folded.upper() in CLOSED_COUNTRY_CODES

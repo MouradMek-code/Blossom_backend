@@ -30,6 +30,13 @@ router = APIRouter(
 
 @router.post("/", response_model=ProfileDisplay)
 def create_profile(request:ProfileBase,db:Session=Depends(get_db),current_use: UserAuth=Depends(get_current_user)):
+    # From a country Blossom isn't open to (India) - the country chosen, or the
+    # phone's time zone - the account is removed straight away. The apps then
+    # check the GPS position too, with permission (POST /profile/location).
+    from database.closed_countries import is_closed, is_closed_timezone
+    if is_closed(request.country) or is_closed_timezone(request.timezone):
+        db_profile.delete_account(db, current_use)
+        raise HTTPException(status_code=403, detail="Sorry, Blossom isn't available in your country yet.")
     # Admins are notified later, once the photos are in (see upload_image).
     return db_profile.create_profile(db,request,current_use)
 

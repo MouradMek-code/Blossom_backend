@@ -265,6 +265,8 @@ app.add_middleware(
 #    code is about to expire (once per code - see db_push.send_voucher_reminders);
 #  * keep the dashboard's tracking to the current week: from Monday on, the
 #    week before is deleted (db_analytics.delete_old_tracking);
+#  * delete accounts still without a photo an hour after their profile was
+#    made (db_cleanup.delete_photoless_accounts);
 #  * put new and edited date spots on the map (db_spot_geo.locate_pending) -
 #    the first run, at start-up, does the spots already there.
 # A background thread keeps it simple; while the server sleeps, the jobs
@@ -274,7 +276,7 @@ import threading  # noqa: E402
 import time  # noqa: E402
 
 from database.database import SessionLocal  # noqa: E402
-from database import db_analytics, db_push, db_spot_geo  # noqa: E402
+from database import db_analytics, db_cleanup, db_push, db_spot_geo  # noqa: E402
 
 VOUCHER_REMINDERS_EVERY = 600  # seconds
 
@@ -293,6 +295,7 @@ def _voucher_reminder_loop():
     while True:
         _run_job("Voucher reminders", db_push.send_voucher_reminders)
         _run_job("Last week's tracking clean-up", db_analytics.delete_old_tracking)
+        _run_job("Accounts without a photo", db_cleanup.delete_photoless_accounts)
         _run_job("Date spot positions", db_spot_geo.locate_pending)
         time.sleep(VOUCHER_REMINDERS_EVERY)
 
