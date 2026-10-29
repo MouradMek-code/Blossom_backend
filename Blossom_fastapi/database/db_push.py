@@ -152,6 +152,12 @@ TEXTS = {
         "zh": "✓ {name} 发送了认证自拍",
         "ar": "✓ أرسل {name} صورة سيلفي للتحقق",
     },
+    "verification_asked": {
+        "en": "⚠️ Please verify your profile within 48 hours, or it will be deleted for suspicious activity. Tap to verify.",
+        "fr": "⚠️ Merci de vérifier votre profil sous 48 heures, sinon il sera supprimé pour activité suspecte. Touchez pour vérifier.",
+        "zh": "⚠️ 请在 48 小时内认证你的资料，否则将因可疑活动被删除。点此认证。",
+        "ar": "⚠️ يرجى توثيق ملفك خلال 48 ساعة، وإلا سيُحذف بسبب نشاط مشبوه. اضغط للتوثيق.",
+    },
     "verification_approved": {
         "en": "✓ You're verified! Your profile now shows the badge.",
         "fr": "✓ Vous êtes vérifié(e) ! Votre profil affiche maintenant le badge.",
@@ -526,6 +532,12 @@ def notify_verification_request(db: Session, background_tasks: BackgroundTasks, 
         }
         for token, language in _admin_targets(db, exclude_user_id=profile.user_id).items()
     ])
+
+
+def notify_verification_asked(db: Session, background_tasks: BackgroundTasks, profile: DbProfile):
+    """The member: an admin asks them to verify within 48 hours."""
+    _queue(background_tasks, _messages_for_profile(db, profile.id, "verification_asked", profile.first_name,
+                                                   {"type": "verification"}))
 
 
 def notify_verification_result(db: Session, background_tasks: BackgroundTasks, profile: DbProfile, approved: bool):

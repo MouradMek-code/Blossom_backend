@@ -6,19 +6,29 @@ approves or rejects it. The selfie is deleted from Cloudinary as soon as the
 admin has decided - only the result is kept.
 """
 import secrets
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import cloudinary.uploader
 from fastapi import BackgroundTasks, HTTPException
 from sqlalchemy.orm import Session, selectinload
 
-from database import db_push
-from database.models import DbProfile, DbVerification
+from database import db_push, mailer
+from database.models import DbProfile, DbPushToken, DbUser, DbVerification
 
 # The poses the apps can show (emoji and text are on their side).
 POSES = ("peace", "thumb", "wave", "point", "ok", "chin")
 # Why a selfie was turned down, shown to the member with the new pose.
 REASONS = ("pose", "face", "blurry")
+
+# An admin's "Ask to verify": the time the member is given to send the selfie,
+# and the extra time after a rejected one. Nothing is deleted automatically:
+# past the deadline, Admin shows it and the admin decides.
+REQUEST_HOURS = 48
+RETRY_HOURS = 24
+
+
+def _iso(value):
+    return value.isoformat() + "Z" if value else None
 
 
 def _own_profile(db: Session, user) -> DbProfile:
@@ -52,10 +62,11 @@ def status(db: Session, user) -> dict:
     The pose to copy is picked here, once, and kept until a selfie is sent."""
     profile = _own_profile(db, user)
     if profile.verified_at:
-        return {"status": "approved", "pose": None, "reason": None}
+        return {"status": "approved", "pose": None, "reason": None, "deadline": None}
+    deadline = _iso(profile.verify_deadline)  # asked by an admin: verify by then
     latest = _latest(db, profile.id)
     if latest and latest.status == "pending":
-        return {"status": "pending", "pose": latest.pose, "reason": None}
+        return {"status": "pending", "pose": latest.pose, "reason": None, "deadline": deadline}
     if profile.verification_pose not in POSES:
         profile.verification_pose = secrets.choice(POSES)
         db.commit()
@@ -64,6 +75,7 @@ def status(db: Session, user) -> dict:
         "status": "rejected" if rejected else "none",
         "pose": profile.verification_pose,
         "reason": latest.reason if rejected else None,
+        "deadline": deadline,
     }
 
 
@@ -96,7 +108,7 @@ def submit(db: Session, user, image, background_tasks: BackgroundTasks) -> dict:
     db.commit()
     db.refresh(verification)
     db_push.notify_verification_request(db, background_tasks, profile)
-    return {"status": "pending", "pose": pose, "reason": None}
+    return {"status": "pending", "pose": pose, "reason": None, "deadline": _iso(profile.verify_deadline)}
 
 
 def list_pending(db: Session) -> list:
@@ -150,13 +162,70 @@ def decide(db: Session, verification_id: int, approve: bool, reason, background_
     if profile:
         if approve:
             profile.verified_at = now
+            profile.verify_deadline = None
         else:
             profile.verification_pose = secrets.choice(POSES)  # a fresh pose for the retry
+            if profile.verify_deadline:
+                # Asked to verify: a day to try again, whatever the deadline was.
+                profile.verify_deadline = max(profile.verify_deadline, now + timedelta(hours=RETRY_HOURS))
     _forget_selfie(verification)
     db.commit()
     if profile:
         db_push.notify_verification_result(db, background_tasks, profile, approve)
     return {"id": verification.id, "status": verification.status}
+
+
+REQUEST_EMAIL = {
+    "en": ("Please verify your Blossom profile",
+           "Please verify your profile",
+           ["Our team has noticed something unusual about your Blossom profile.",
+            "To keep it, please verify that it's really you within <b>48 hours</b>: copy a pose and take a quick "
+            "selfie. If it isn't verified in time, the profile will be deleted for suspicious activity."],
+           "Verify my profile"),
+    "fr": ("Merci de vérifier votre profil Blossom",
+           "Merci de vérifier votre profil",
+           ["Notre équipe a remarqué quelque chose d'inhabituel sur votre profil Blossom.",
+            "Pour le garder, merci de confirmer que c'est bien vous sous <b>48 heures</b> : reproduisez une pose "
+            "et prenez un selfie rapide. Sans vérification à temps, le profil sera supprimé pour activité suspecte."],
+           "Vérifier mon profil"),
+    "zh": ("请认证你的 Blossom 资料",
+           "请认证你的资料",
+           ["我们的团队注意到你的 Blossom 资料有异常。",
+            "如需保留资料，请在 <b>48 小时</b>内证明真的是你：模仿一个姿势并拍一张自拍。逾期未认证，资料将因可疑活动被删除。"],
+           "认证我的资料"),
+    "ar": ("يرجى توثيق ملفك على Blossom",
+           "يرجى توثيق ملفك الشخصي",
+           ["لاحظ فريقنا شيئًا غير معتاد في ملفك الشخصي على Blossom.",
+            "للاحتفاظ به، يرجى إثبات أنه أنت حقًا خلال <b>48 ساعة</b>: قلّد وضعية والتقط صورة سيلفي سريعة. "
+            "إذا لم يتم التوثيق في الوقت المحدد، سيُحذف الملف بسبب نشاط مشبوه."],
+           "توثيق ملفي"),
+}
+
+
+def request(db: Session, profile_id: int, background_tasks: BackgroundTasks) -> dict:
+    """Admin: "Ask to verify". The member is told by notification and email
+    to verify within 48 hours or the profile will be deleted - by the admin,
+    by hand (Admin shows when the deadline has passed)."""
+    profile = db.get(DbProfile, profile_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found.")
+    if profile.verified_at:
+        raise HTTPException(status_code=409, detail="Already verified.")
+    profile.verify_deadline = datetime.utcnow() + timedelta(hours=REQUEST_HOURS)
+    if profile.verification_pose not in POSES:
+        profile.verification_pose = secrets.choice(POSES)
+    db.commit()
+
+    db_push.notify_verification_asked(db, background_tasks, profile)
+    user = db.get(DbUser, profile.user_id)
+    language = db.query(DbPushToken.language).filter(DbPushToken.user_id == profile.user_id).scalar()
+    subject, title, paragraphs, button = REQUEST_EMAIL[db_push.normalize_language(language)]
+    if user and user.email:
+        background_tasks.add_task(
+            mailer.send_email, user.email, subject,
+            mailer.card(title, paragraphs, (button, "https://blossom-date.com/verify")),
+        )
+    return {"profile_id": profile.id, "deadline": _iso(profile.verify_deadline)}
 
 
 def clear_profile(db: Session, profile):

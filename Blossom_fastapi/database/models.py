@@ -123,6 +123,9 @@ class DbProfile(Base):
     # (database/db_verification.py), and the pose asked for the next selfie.
     verified_at = Column(DateTime, nullable=True)
     verification_pose = Column(String(20), nullable=True)
+    # An admin asked this member to verify (suspicious profile) by then; the
+    # admin deletes the account by hand if they don't.
+    verify_deadline = Column(DateTime, nullable=True)
 
     @property
     def verified(self):

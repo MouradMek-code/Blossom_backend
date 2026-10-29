@@ -69,6 +69,9 @@ def _person(profile: DbProfile, name: str):
         "city": profile.city,
         "photo": photos[0].image_url if photos else None,
         "deleted": False,
+        "verified": profile.verified_at is not None,
+        "verify_by": profile.verify_deadline.isoformat() + "Z"
+        if profile.verify_deadline and not profile.verified_at else None,
     }
 
 

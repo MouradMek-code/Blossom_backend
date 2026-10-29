@@ -45,6 +45,18 @@ def pending_selfies(db: Session = Depends(get_db), current_user: UserAuth = Depe
     return db_verification.list_pending(db)
 
 
+@router.post("/admin/request/{profile_id}")
+def ask_to_verify(
+    profile_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: UserAuth = Depends(get_current_user),
+):
+    """A suspicious profile: verify within 48 hours or the account is deleted."""
+    _require_admin(current_user)
+    return db_verification.request(db, profile_id, background_tasks)
+
+
 @router.post("/admin/{verification_id}/approve")
 def approve(
     verification_id: int,

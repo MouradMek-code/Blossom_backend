@@ -110,7 +110,11 @@ def get_badges(db: Session = Depends(get_db), current_user: UserAuth = Depends(g
     request and ~6 queries. The old endpoints stay for older app versions.
     """
     is_admin = bool(getattr(current_user, "is_admin", False))
-    profile_id = db.query(DbProfile.id).filter(DbProfile.user_id == current_user.id).scalar()
+    profile_row = (
+        db.query(DbProfile.id, DbProfile.verify_deadline, DbProfile.verified_at)
+        .filter(DbProfile.user_id == current_user.id).first()
+    )
+    profile_id = profile_row[0] if profile_row else None
     if profile_id is None:
         return {"has_profile": False, "has_photo": False, "is_admin": is_admin, "matches": 0, "likes": 0, "messages": 0}
     # No photo yet (sign-up stopped at the photo step): the apps send them back
@@ -136,9 +140,12 @@ def get_badges(db: Session = Depends(get_db), current_user: UserAuth = Depends(g
     if matched_ids:
         likes_query = likes_query.filter(DbProfileLike.liker_profile_id.notin_(matched_ids))
 
+    # Asked by an admin to verify: the apps show a warning until then.
+    verify_by = profile_row[1] if profile_row[1] and not profile_row[2] else None
     return {
         "has_profile": True,
         "has_photo": has_photo,
+        "verify_by": verify_by.isoformat() + "Z" if verify_by else None,
         "is_admin": is_admin,
         "matches": unseen_matches,
         "likes": likes_query.scalar() or 0,
@@ -439,6 +446,9 @@ def admin_get_all_users(db: Session = Depends(get_db), _: UserAuth = Depends(req
                 "photo": profile.photos[0].image_url if profile.photos else None,
                 "photos_count": len(profile.photos),
                 "connection_type": profile.connection_type,
+                "verified": profile.verified_at is not None,
+                "verify_by": profile.verify_deadline.isoformat() + "Z"
+                if profile.verify_deadline and not profile.verified_at else None,
             } if profile else None,
         })
     return result

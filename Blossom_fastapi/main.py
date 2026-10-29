@@ -153,6 +153,7 @@ with engine.begin() as connection:
     # The ✓ verified badge (routers/verification.py).
     connection.execute(text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS verified_at TIMESTAMP"))
     connection.execute(text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS verification_pose VARCHAR(20)"))
+    connection.execute(text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS verify_deadline TIMESTAMP"))
     connection.execute(text("ALTER TABLE otps ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0"))
     # "Spot of the week" (routers/date_spot.py).
     connection.execute(text("ALTER TABLE date_spots ADD COLUMN IF NOT EXISTS featured_until TIMESTAMP"))
