@@ -56,7 +56,7 @@ def record_visit(
 
 @router.get("/dashboard")
 def get_dashboard(
-    days: int = Query(30, ge=1, le=365),
+    days: int = Query(7, ge=1, le=365),
     tz_offset: int = Query(0, description="Minutes ahead of UTC, e.g. 120 for Paris in summer"),
     db: Session = Depends(get_db),
     current_user: UserAuth = Depends(get_current_user),
@@ -64,7 +64,8 @@ def get_dashboard(
     """Admins only: visitors, new members and where they come from."""
     if not getattr(current_user, "is_admin", False):
         raise HTTPException(status_code=403, detail="Admin access required")
-    return db_analytics.dashboard(db, days, tz_offset)
+    # Tracking only covers the current week; older apps still ask for 30 days.
+    return db_analytics.dashboard(db, min(days, 7), tz_offset)
 
 
 @router.post("/admin/forget_member_visits")
