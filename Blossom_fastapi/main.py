@@ -263,8 +263,8 @@ app.add_middleware(
 # Background jobs, every 10 minutes:
 #  * "⏰ Your -20% at Café Lune ends in 5 h": remind couples whose promotion
 #    code is about to expire (once per code - see db_push.send_voucher_reminders);
-#  * delete the dashboard's page-by-page details older than a week
-#    (db_analytics.delete_old_pages);
+#  * keep the dashboard's tracking to the current week: from Monday on, the
+#    week before is deleted (db_analytics.delete_old_tracking);
 #  * put new and edited date spots on the map (db_spot_geo.locate_pending) -
 #    the first run, at start-up, does the spots already there.
 # A background thread keeps it simple; while the server sleeps, the jobs
@@ -292,7 +292,7 @@ def _run_job(name, job):
 def _voucher_reminder_loop():
     while True:
         _run_job("Voucher reminders", db_push.send_voucher_reminders)
-        _run_job("Old dashboard pages clean-up", db_analytics.delete_old_pages)
+        _run_job("Last week's tracking clean-up", db_analytics.delete_old_tracking)
         _run_job("Date spot positions", db_spot_geo.locate_pending)
         time.sleep(VOUCHER_REMINDERS_EVERY)
 

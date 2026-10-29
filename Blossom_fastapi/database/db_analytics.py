@@ -37,11 +37,10 @@ def _clean(value, length):
 
 
 MAX_PAGES_PER_VISIT = 300
-# Page-by-page details are kept one week, then deleted (delete_old_pages):
-# the table would otherwise grow forever. Visits themselves stay - the
-# 7/30/90-day charts need them, and an older day still shows each visit with
-# the page it started on.
-PAGES_KEPT = timedelta(days=7)
+# Tracking (visits and the pages seen) only covers the current week: every
+# Monday at 00:00 UTC (01:00 in Paris, 02:00 in summer) the week before is
+# deleted and counting starts again (delete_old_tracking). Likes, matches,
+# messages and profiles aren't tracking and stay.
 # A long random segment in a path is a secret (a friend's activation link, a
 # venue's manager link): never stored as such.
 SECRET_SEGMENT = re.compile(r"/[A-Za-z0-9_-]{16,}(?=/|$)")
@@ -59,10 +58,19 @@ def clean_path(value):
     return path[:120] or None
 
 
-def delete_old_pages(db: Session, now: datetime = None) -> int:
-    """Delete the pages seen more than a week ago. Returns how many."""
+def this_week_start(now: datetime = None) -> datetime:
+    """Monday 00:00 UTC of the current week."""
     now = now or datetime.utcnow()
-    deleted = db.query(DbVisitPage).filter(DbVisitPage.at < now - PAGES_KEPT).delete(synchronize_session=False)
+    return datetime.combine(now.date() - timedelta(days=now.weekday()), datetime.min.time())
+
+
+def delete_old_tracking(db: Session, now: datetime = None) -> int:
+    """Delete the visits from before this week, and the pages seen during
+    them. Returns how many visits."""
+    cutoff = this_week_start(now)
+    old = select(DbVisit.id).where(DbVisit.created_at < cutoff)
+    db.query(DbVisitPage).filter(DbVisitPage.visit_id.in_(old)).delete(synchronize_session=False)
+    deleted = db.query(DbVisit).filter(DbVisit.created_at < cutoff).delete(synchronize_session=False)
     db.commit()
     return deleted
 
