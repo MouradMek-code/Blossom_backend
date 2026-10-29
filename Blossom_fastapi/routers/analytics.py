@@ -67,6 +67,19 @@ def get_dashboard(
     return db_analytics.dashboard(db, days, tz_offset)
 
 
+@router.post("/admin/forget_member_visits")
+def forget_member_visits(
+    tz_offset: int = Query(0, description="Minutes ahead of UTC, e.g. 60 for Paris in winter"),
+    db: Session = Depends(get_db),
+    current_user: UserAuth = Depends(get_current_user),
+):
+    """Admins only: delete members' visit tracking from before this week
+    (Monday 00:00 in the admin's time zone). This week's stays."""
+    if not getattr(current_user, "is_admin", False):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return db_analytics.forget_member_visits(db, tz_offset)
+
+
 @router.get("/day")
 def get_day(
     day: Optional[date] = Query(None, description="YYYY-MM-DD in the admin's time zone; today when empty"),

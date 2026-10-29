@@ -16,7 +16,7 @@ import re
 from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta
 
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from database.models import (
@@ -65,6 +65,32 @@ def delete_old_pages(db: Session, now: datetime = None) -> int:
     deleted = db.query(DbVisitPage).filter(DbVisitPage.at < now - PAGES_KEPT).delete(synchronize_session=False)
     db.commit()
     return deleted
+
+
+def week_start(tz_offset_minutes: int = 0, now: datetime = None) -> datetime:
+    """Monday 00:00 of this week in the admin's time zone, as UTC."""
+    now = now or datetime.utcnow()
+    offset = timedelta(minutes=max(-840, min(840, int(tz_offset_minutes or 0))))
+    today = (now + offset).date()
+    monday = today - timedelta(days=today.weekday())
+    return datetime.combine(monday, datetime.min.time()) - offset
+
+
+def forget_member_visits(db: Session, tz_offset_minutes: int = 0, now: datetime = None) -> dict:
+    """Admin, on request: delete members' visits (and the pages they saw)
+    from before this week - last week, last months, last years. This week's
+    stay, and visitors without a profile aren't touched. Likes, matches and
+    messages aren't tracking and stay too."""
+    cutoff = week_start(tz_offset_minutes, now)
+    old = select(DbVisit.id).where(DbVisit.profile_id.isnot(None), DbVisit.created_at < cutoff)
+    db.query(DbVisitPage).filter(DbVisitPage.visit_id.in_(old)).delete(synchronize_session=False)
+    deleted = (
+        db.query(DbVisit)
+        .filter(DbVisit.profile_id.isnot(None), DbVisit.created_at < cutoff)
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    return {"deleted": deleted, "kept_from": cutoff.isoformat() + "Z"}
 
 
 def _add_page(db: Session, visit: DbVisit, path, now: datetime):
