@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 from database.models import DbDateSpot
 
 NOMINATIM = "https://nominatim.openstreetmap.org/search"
+NOMINATIM_REVERSE = "https://nominatim.openstreetmap.org/reverse"
 USER_AGENT = "BlossomDate/1.0 (+https://blossom-date.com)"
 MAX_KM_FROM_CITY = 50
 SPOTS_PER_RUN = 40
@@ -92,9 +93,9 @@ _last_call = [0.0]
 _city_centres = {}
 
 
-def _nominatim(query: str):
-    """First result for a free-text search, or None when there's none. One
-    request a second at most, from every thread together (Nominatim's rule)."""
+def _ask_nominatim(url: str, params: dict):
+    """The answer as JSON. One request a second at most, from every thread
+    together (Nominatim's rule)."""
     with _lock:
         wait = 1.1 - (time.monotonic() - _last_call[0])
         if wait > 0:
@@ -102,8 +103,8 @@ def _nominatim(query: str):
         _last_call[0] = time.monotonic()
         try:
             resp = requests.get(
-                NOMINATIM,
-                params={"q": query, "format": "jsonv2", "limit": 1},
+                url,
+                params={"format": "jsonv2", **params},
                 headers={"User-Agent": USER_AGENT, "Accept-Language": "en"},
                 timeout=10,
             )
@@ -112,12 +113,41 @@ def _nominatim(query: str):
     if resp.status_code != 200:
         raise LookupFailed(f"HTTP {resp.status_code}")
     try:
-        results = resp.json()
+        return resp.json()
     except ValueError:
         raise LookupFailed("not JSON")
+
+
+def _nominatim(query: str):
+    """First result for a free-text search, or None when there's none."""
+    results = _ask_nominatim(NOMINATIM, {"q": query, "limit": 1})
     if not results:
         return None
     return _valid(results[0].get("lat"), results[0].get("lon"))
+
+
+def city_at(lat, lng):
+    """(country code, city) at a position, or None when it can't be told. The
+    position is rounded to about a kilometre first: approximate is enough, and
+    it's all that leaves the server."""
+    position = _valid(lat, lng)
+    if not position:
+        return None
+    try:
+        place = _ask_nominatim(NOMINATIM_REVERSE, {
+            "lat": round(position[0], 2), "lon": round(position[1], 2), "zoom": 10, "addressdetails": 1,
+        })
+    except LookupFailed as exc:
+        log.warning("Reverse geocoding failed: %s", exc)
+        return None
+    address = place.get("address") or {} if isinstance(place, dict) else {}
+    code = (address.get("country_code") or "").upper()
+    if len(code) != 2:
+        return None
+    for key in ("city", "town", "village", "municipality", "county", "state"):
+        if address.get(key):
+            return code, address[key]
+    return code, None
 
 
 def city_centre(city: str, country: str):

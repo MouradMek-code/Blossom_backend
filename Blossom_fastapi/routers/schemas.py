@@ -451,6 +451,12 @@ class DetectedLocation(BaseModel):
     city: Optional[str] = Field(default=None, max_length=80)
 
 
+class DetectedCoords(BaseModel):
+    """Where the browser is: it only knows coordinates (never stored)."""
+    lat: float
+    lng: float
+
+
 class ReportCreate(BaseModel):
     reported_profile_id: int
     reason: str = Field(min_length=1, max_length=1000)

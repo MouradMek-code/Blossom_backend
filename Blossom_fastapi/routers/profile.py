@@ -7,7 +7,7 @@ from database import db_profile,db_message,db_push
 from database.models import DbProfile,DbProfilePhoto
 from auth.oauth2 import get_current_user
 from database.database import get_db
-from routers.schemas import ProfileBase, ProfileDisplay, UserAuth,ProfileDisplayforPhoto,BioUpdate,ConnectionUpdate,DetectedLocation,PauseUpdate
+from routers.schemas import ProfileBase, ProfileDisplay, UserAuth,ProfileDisplayforPhoto,BioUpdate,ConnectionUpdate,DetectedCoords,DetectedLocation,PauseUpdate
 from routers.schemas import UserAuth,ProfilePhotoDisplay
 import cloudinary.uploader
 from datetime import datetime
@@ -118,10 +118,27 @@ def detected_location(payload: DetectedLocation, db: Session = Depends(get_db),
     """The app, after the profile exists: where the phone is now (approximate,
     with the member's permission). The profile's city and country follow it.
     In a country Blossom isn't open to (India), the account is removed."""
+    return _follow_location(db, current_user, payload.country_code, payload.city)
+
+
+@router.post("/location/coords")
+def detected_coords(payload: DetectedCoords, db: Session = Depends(get_db),
+                    current_user: UserAuth = Depends(get_current_user)):
+    """The website's location page: same as /location, but a browser only
+    knows coordinates, so the city is looked up here. The coordinates aren't
+    stored. Not found: nothing changes, the sign-up just carries on."""
+    from database import db_spot_geo
+    place = db_spot_geo.city_at(payload.lat, payload.lng)
+    if not place:
+        return {"removed": False, "updated": False}
+    return _follow_location(db, current_user, place[0], place[1])
+
+
+def _follow_location(db: Session, current_user: UserAuth, country_code: str, detected_city):
     from database.closed_countries import CLOSED_COUNTRY_CODES
     from routers.geo import country_name
 
-    code = payload.country_code.strip().upper()
+    code = country_code.strip().upper()
     profile = db.query(DbProfile).filter(DbProfile.user_id == current_user.id).first()
     if profile is None:
         return {"removed": False, "updated": False}
@@ -129,7 +146,7 @@ def detected_location(payload: DetectedLocation, db: Session = Depends(get_db),
         db_profile.delete_account(db, current_user)
         return {"removed": True, "updated": False}
     country = country_name(code)
-    city = " ".join((payload.city or "").split())[:50]
+    city = " ".join((detected_city or "").split())[:50]
     if not country or not city:
         return {"removed": False, "updated": False}
     if profile.city == city and profile.country == country:
