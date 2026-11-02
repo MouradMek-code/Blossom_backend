@@ -4,8 +4,9 @@ minutes).
 Sign-up saves the profile before the photo step, so anyone who stopped there
 kept an account nobody could see. One hour is left to add a photo (the photo
 step itself takes a minute or two); after that the account goes, as do
-accounts that never got as far as a profile. Admins and the profiles an admin
-made for a friend are never touched.
+accounts that never got as far as a profile. Admins, the profiles an admin
+made for a friend and protected accounts (Google Play's review account) are
+never touched.
 """
 import logging
 from datetime import datetime, timedelta
@@ -15,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from database import db_profile
 from database.models import DbProfile, DbUser
+from database.protected_accounts import is_protected
 
 GRACE = timedelta(hours=1)
 
@@ -45,6 +47,8 @@ def delete_photoless_accounts(db: Session, now: datetime = None) -> int:
 
     deleted = 0
     for user in no_photo.all() + no_profile.all():
+        if is_protected(user):
+            continue
         try:
             db_profile.delete_account(db, user)
             deleted += 1

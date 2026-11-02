@@ -34,7 +34,8 @@ def create_profile(request:ProfileBase,db:Session=Depends(get_db),current_use: U
     # phone's time zone - the account is removed straight away. The apps then
     # check the GPS position too, with permission (POST /profile/location).
     from database.closed_countries import is_closed, is_closed_timezone
-    if is_closed(request.country) or is_closed_timezone(request.timezone):
+    from database.protected_accounts import is_protected
+    if (is_closed(request.country) or is_closed_timezone(request.timezone)) and not is_protected(current_use):
         db_profile.delete_account(db, current_use)
         raise HTTPException(status_code=403, detail="Sorry, Blossom isn't available in your country yet.")
     # Admins are notified later, once the photos are in (see upload_image).
@@ -136,6 +137,7 @@ def detected_coords(payload: DetectedCoords, db: Session = Depends(get_db),
 
 def _follow_location(db: Session, current_user: UserAuth, country_code: str, detected_city):
     from database.closed_countries import CLOSED_COUNTRY_CODES
+    from database.protected_accounts import is_protected
     from routers.geo import country_name
 
     code = country_code.strip().upper()
@@ -143,6 +145,8 @@ def _follow_location(db: Session, current_user: UserAuth, country_code: str, det
     if profile is None:
         return {"removed": False, "updated": False}
     if code in CLOSED_COUNTRY_CODES:
+        if is_protected(current_user):  # Google Play's reviewers may be there
+            return {"removed": False, "updated": False}
         db_profile.delete_account(db, current_user)
         return {"removed": True, "updated": False}
     country = country_name(code)
