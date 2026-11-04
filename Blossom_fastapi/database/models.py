@@ -829,3 +829,21 @@ class DbVerification(Base):
     reason = Column(String(20), nullable=True)  # why it was rejected: pose | face | blurry
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     reviewed_at = Column(DateTime, nullable=True)
+
+
+class DbFeedback(Base):
+    """"Report a problem" from the app or the website: a child safety concern,
+    a scam, harassment, a bug... from members and visitors. Kept when the
+    reporter's account is deleted (their name stays)."""
+    __tablename__ = "feedback_reports"
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime, nullable=False, index=True)
+    kind = Column(String(20), nullable=False)  # child_safety | scam | harassment | bug | other
+    message = Column(Text, nullable=False)
+    profile_id = Column(Integer, nullable=True, index=True)  # the member who sent it, if logged in
+    reporter_name = Column(String(120), nullable=True)
+    email = Column(String(200), nullable=True)
+    about_profile_id = Column(Integer, nullable=True)  # sent from someone's profile
+    language = Column(String(8), nullable=True)
+    handled = Column(Boolean, nullable=False, default=False, server_default="false")

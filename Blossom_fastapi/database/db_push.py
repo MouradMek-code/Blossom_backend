@@ -146,6 +146,18 @@ TEXTS = {
         "zh": "🏪 新的合作申请：{name} - {title}",
         "ar": "🏪 طلب شراكة جديد: {name} - {title}",
     },
+    "feedback_child": {
+        "en": "🚨 Child safety report: {snippet}",
+        "fr": "🚨 Signalement sécurité des enfants : {snippet}",
+        "zh": "🚨 儿童安全举报：{snippet}",
+        "ar": "🚨 بلاغ سلامة الأطفال: {snippet}",
+    },
+    "feedback": {
+        "en": "🛟 Problem reported: {snippet}",
+        "fr": "🛟 Problème signalé : {snippet}",
+        "zh": "🛟 有人反馈了问题：{snippet}",
+        "ar": "🛟 تم الإبلاغ عن مشكلة: {snippet}",
+    },
     "verification_request": {
         "en": "✓ {name} sent a selfie to get verified",
         "fr": "✓ {name} a envoyé un selfie pour être vérifié(e)",
@@ -510,6 +522,24 @@ def notify_business_message(db: Session, background_tasks: BackgroundTasks, mess
             "title": "Blossom",
             "body": TEXTS["business_message"][normalize_language(language)].format(name=message.name, business=business),
             "data": {"type": "business_message", "messageId": message.id},
+            "sound": "default",
+            "channelId": "default",
+            "priority": "high",
+        }
+        for token, language in _admin_targets(db).items()
+    ])
+
+
+def notify_feedback(db: Session, background_tasks: BackgroundTasks, report):
+    """"Report a problem" to the admins, at once - child safety first."""
+    kind = "feedback_child" if report.kind == "child_safety" else "feedback"
+    snippet = report.message if len(report.message) <= 80 else report.message[:79] + "…"
+    _queue(background_tasks, [
+        {
+            "to": token,
+            "title": "Blossom",
+            "body": TEXTS[kind][normalize_language(language)].format(snippet=snippet),
+            "data": {"type": "feedback", "reportId": report.id},
             "sound": "default",
             "channelId": "default",
             "priority": "high",
