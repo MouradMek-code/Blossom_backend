@@ -96,6 +96,13 @@ def admin_update(offer_id: int, payload: OfferUpdate, db: Session = Depends(get_
     return db_offers.update_offer(db, offer_id, changes)
 
 
+@router.delete("/admin/{offer_id}")
+def admin_delete(offer_id: int, db: Session = Depends(get_db), user: UserAuth = Depends(get_current_user)):
+    """Gone for good, with the codes couples got for it."""
+    _require_admin(user)
+    return db_offers.delete_offer(db, offer_id)
+
+
 # ---- couples -------------------------------------------------------------------
 
 @router.post("/invites/{message_id}/accept")

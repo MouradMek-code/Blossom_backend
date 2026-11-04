@@ -150,9 +150,20 @@ def create_request(db: Session, background_tasks: BackgroundTasks, data: dict, v
                 raise HTTPException(status_code=400, detail="Enter the name of your place.")
             if not city or not country:
                 raise HTTPException(status_code=400, detail="Enter the city and the country.")
-            map_url = _text(data.get("map_url"), 500)
-            if map_url and not map_url.lower().startswith(("http://", "https://")):
-                raise HTTPException(status_code=400, detail="The Google Maps link should start with https://")
+            # Required, and a real Google Maps address: promotions sent with
+            # only a message were spam. (A place picked from Blossom's list
+            # has its link already.)
+            from routers.date_spot import _clean_map_url
+            no_link = HTTPException(status_code=400, detail={
+                "reason": "map_link",
+                "message": "Paste the Google Maps link of your place: in Google Maps, open it → Share → Copy link.",
+            })
+            try:
+                map_url = _clean_map_url(data.get("map_url"))
+            except HTTPException:
+                raise no_link
+            if not map_url:
+                raise no_link
         if not email or not EMAIL_RE.match(email):
             raise HTTPException(status_code=400, detail="Enter a valid email address, so we can answer you.")
         recent = db.query(func.count(DbPartnerRequest.id)).filter(
@@ -328,6 +339,17 @@ def approve(db: Session, background_tasks: BackgroundTasks, request_id: int, cha
     if venue.contact_email:
         background_tasks.add_task(mailer.send_email, venue.contact_email, *_approved_email(venue, title, offer["id"]))
     return request_view(db, request)
+
+
+def delete_request(db: Session, request_id: int) -> dict:
+    """Admin: a request deleted without a word to the sender - for spam.
+    ("Refuse" emails them.) A place or promotion already made from it stays."""
+    request = db.get(DbPartnerRequest, request_id)
+    if not request:
+        raise HTTPException(status_code=404, detail="Request not found.")
+    db.delete(request)
+    db.commit()
+    return {"deleted": request_id}
 
 
 def refuse(db: Session, background_tasks: BackgroundTasks, request_id: int, reason=None, now: datetime = None):

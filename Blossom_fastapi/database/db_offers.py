@@ -296,6 +296,23 @@ def create_offer(db: Session, spot_id: int, title, details, max_couples, ends_at
     return admin_view(db, offer, now)
 
 
+def delete_offer(db: Session, offer_id: int) -> dict:
+    """Admin: gone for good, with the codes couples got for it. (Pause or end
+    it instead to keep its history.) A partner request it came from stays,
+    unlinked."""
+    from database.models import DbPartnerRequest
+
+    offer = db.get(DbSpotOffer, offer_id)
+    if not offer:
+        raise HTTPException(status_code=404, detail="Promotion not found.")
+    db.query(DbSpotVoucher).filter(DbSpotVoucher.offer_id == offer.id).delete(synchronize_session=False)
+    db.query(DbPartnerRequest).filter(DbPartnerRequest.offer_id == offer.id).update(
+        {DbPartnerRequest.offer_id: None}, synchronize_session=False)
+    db.delete(offer)
+    db.commit()
+    return {"deleted": offer_id}
+
+
 def update_offer(db: Session, offer_id: int, changes: dict, now: datetime = None):
     now = now or datetime.utcnow()
     offer = db.get(DbSpotOffer, offer_id)

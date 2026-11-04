@@ -156,6 +156,13 @@ def refuse(request_id: int, payload: RefuseIn, background_tasks: BackgroundTasks
     return db_partners.refuse(db, background_tasks, request_id, payload.reason)
 
 
+@router.delete("/requests/{request_id}")
+def delete_request(request_id: int, db: Session = Depends(get_db), user: UserAuth = Depends(get_current_user)):
+    """Spam: deleted without emailing the sender (refuse emails them)."""
+    _require_admin(user)
+    return db_partners.delete_request(db, request_id)
+
+
 @router.get("/venues")
 def list_venues(db: Session = Depends(get_db), user: UserAuth = Depends(get_current_user)):
     _require_admin(user)

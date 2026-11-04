@@ -48,6 +48,9 @@ router = APIRouter(
 # everyone, so accepting arbitrary URLs would turn the page into a phishing
 # vector; restricting the host keeps the "Open in Maps" button trustworthy.
 _MAP_HOSTS = ("google.com", "goo.gl", "maps.app.goo.gl", "maps.google.com")
+# Google's country sites - not just any address starting with "google."
+# (google.evil.com was let through).
+_GOOGLE_COUNTRY_HOST = re.compile(r"^google\.(?:[a-z]{2}|co\.[a-z]{2}|com\.[a-z]{2})$")
 
 # Vibe tags. Deliberately the place-shaped subset of a profile's
 # first_date_preference options, so a spot's tag and a person's preference are
@@ -90,7 +93,7 @@ def _clean_map_url(raw: Optional[str]) -> Optional[str]:
     allowed = (
         host in _MAP_HOSTS
         or host.endswith(".google.com")
-        or host.startswith("google.")          # google.fr, google.co.uk, ...
+        or _GOOGLE_COUNTRY_HOST.match(host)    # google.fr, google.co.uk, google.com.br
         or host.endswith(".goo.gl")
     )
     if not allowed:
