@@ -1,9 +1,12 @@
-""""Partner with Blossom": venues offering a promotion to Blossom couples.
+""""Partner with Blossom": venues on Blossom, with or without a gift for couples.
 
   * A café fills in the public form -> a pending request; admins get a
     notification. An admin approves (the spot, the venue and the promotion are
     created, the café gets an email with its manager link and staff code) or
     refuses (a polite email).
+  * "Just list my place": the same form without a gift. Approving it puts the
+    place on Date spots - no offer, no manager link; a gift can be asked for
+    later from the same form (the place is then picked from the search).
   * No account for venues: the owner's private manager link lets them pause,
     resume, add places, extend the end date - at once - and ask for a new
     offer, which comes back to the admins as a request (anything couples will
@@ -116,11 +119,19 @@ def spot_for_form(db: Session, spot_id: int) -> dict:
 def create_request(db: Session, background_tasks: BackgroundTasks, data: dict, venue: DbVenue = None,
                    now: datetime = None):
     now = now or datetime.utcnow()
-    title = _text(data.get("offer_title"), 120)
-    _check_offer_fields(title, data.get("max_couples"), data.get("ends_at"), data.get("valid_hours"), now)
+    # "Just list my place": no gift (only from the public form).
+    place_only = venue is None and bool(data.get("place_only"))
+    title = None if place_only else _text(data.get("offer_title"), 120)
+    if not place_only:
+        _check_offer_fields(title, data.get("max_couples"), data.get("ends_at"), data.get("valid_hours"), now)
 
     spot = None
-    if venue is None and data.get("spot_id"):
+    if place_only and data.get("spot_id"):
+        # Picked from Blossom's list: it's listed already.
+        found = db.get(DbDateSpot, data["spot_id"])
+        if found and found.status == "published":
+            raise _already_listed(db, found)
+    if venue is None and data.get("spot_id") and not place_only:
         spot = db.get(DbDateSpot, data["spot_id"])
         if not spot:
             raise HTTPException(status_code=404, detail={
@@ -138,6 +149,7 @@ def create_request(db: Session, background_tasks: BackgroundTasks, data: dict, v
                            "venue's email.",
             })
 
+    category = None
     if venue is None:
         email = _text(data.get("contact_email"), 200)
         if spot is not None:
@@ -164,6 +176,14 @@ def create_request(db: Session, background_tasks: BackgroundTasks, data: dict, v
                 raise no_link
             if not map_url:
                 raise no_link
+            from routers.date_spot import _clean_category
+            category = _clean_category(data.get("category"))
+            # Same Google Maps place already on Date spots: nothing to add.
+            if place_only:
+                found = db.query(DbDateSpot).filter(
+                    DbDateSpot.map_url == map_url, DbDateSpot.status == "published").first()
+                if found:
+                    raise _already_listed(db, found)
         if not email or not EMAIL_RE.match(email):
             raise HTTPException(status_code=400, detail="Enter a valid email address, so we can answer you.")
         recent = db.query(func.count(DbPartnerRequest.id)).filter(
@@ -183,9 +203,11 @@ def create_request(db: Session, background_tasks: BackgroundTasks, data: dict, v
         created_at=now, status="pending", venue_id=venue.id if venue else None,
         spot_id=spot.id if spot else None,
         venue_name=name, map_url=map_url, city=city, country=country,
-        about=_long_text(data.get("about"), 1000),
-        offer_title=title, offer_details=_long_text(data.get("offer_details"), 500),
-        max_couples=data.get("max_couples"), ends_at=data.get("ends_at"), valid_hours=data.get("valid_hours"),
+        about=_long_text(data.get("about"), 1000), category=category,
+        offer_title=title, offer_details=None if place_only else _long_text(data.get("offer_details"), 500),
+        max_couples=None if place_only else data.get("max_couples"),
+        ends_at=None if place_only else data.get("ends_at"),
+        valid_hours=None if place_only else data.get("valid_hours"),
         contact_name=_text(data.get("contact_name"), 120) if venue is None else venue.contact_name,
         contact_email=email,
         contact_phone=_text(data.get("contact_phone"), 40) if venue is None else venue.contact_phone,
@@ -199,6 +221,17 @@ def create_request(db: Session, background_tasks: BackgroundTasks, data: dict, v
     if venue is None and email:
         background_tasks.add_task(mailer.send_email, email, *_received_email(request))
     return {"id": request.id, "status": request.status}
+
+
+def _already_listed(db: Session, spot: DbDateSpot) -> HTTPException:
+    """"Just list my place" for a place that's on Date spots already: said at
+    once, with the spot - the form then offers to add a gift to it."""
+    partner = db.query(DbVenue.id).filter(DbVenue.spot_id == spot.id).first() is not None
+    return HTTPException(status_code=409, detail={
+        "reason": "already_listed",
+        "message": f"{spot.name} is already on Blossom.",
+        "spot": _spot_brief(spot, partner),
+    })
 
 
 def _suggested_spot(db: Session, request: DbPartnerRequest):
@@ -228,7 +261,10 @@ def request_view(db: Session, request: DbPartnerRequest):
         "id": request.id,
         "created_at": request.created_at,
         "status": request.status,
-        "kind": "new_offer" if request.venue_id else "new_venue",
+        # new_offer: from a manager page; new_venue: a place with a gift;
+        # new_place: "just list my place".
+        "kind": "new_offer" if request.venue_id else ("new_venue" if request.offer_title else "new_place"),
+        "category": request.category,
         "venue_name": request.venue_name,
         "map_url": request.map_url,
         "city": request.city or (venue.spot.city if venue and venue.spot else None),
@@ -297,9 +333,13 @@ def approve(db: Session, background_tasks: BackgroundTasks, request_id: int, cha
         if key in changes:
             setattr(request, key, changes[key])
     title = _text(request.offer_title, 120)
+    request.offer_title = title
+    # No gift: the place is published on Date spots on its own.
+    place_only = request.venue_id is None and not title
     ends_at = request.ends_at or now + timedelta(days=DEFAULT_OPEN_DAYS)
     valid_hours = request.valid_hours or DEFAULT_VALID_HOURS
-    _check_offer_fields(title, request.max_couples, ends_at, valid_hours, now)
+    if not place_only:
+        _check_offer_fields(title, request.max_couples, ends_at, valid_hours, now)
 
     if request.venue_id:
         venue = request.venue
@@ -318,11 +358,24 @@ def approve(db: Session, background_tasks: BackgroundTasks, request_id: int, cha
                 raise HTTPException(status_code=400, detail="Name, city and country are needed to create the spot.")
             spot = DbDateSpot(
                 name=name, city=_text(request.city, 120), country=_text(request.country, 120),
-                description=request.about or f"{name} - a Blossom partner 🌸",
-                map_url=request.map_url, created_at=now,
+                description=request.about or (f"{name} 🌸" if place_only else f"{name} - a Blossom partner 🌸"),
+                map_url=request.map_url, category=request.category, created_at=now,
             )
             db.add(spot)
             db.flush()
+        elif request.category and not spot.category:
+            spot.category = request.category
+
+        if place_only:
+            spot.status = "published"
+            request.status = "approved"
+            request.reviewed_at = now
+            request.spot_id = spot.id
+            db.commit()
+            if request.contact_email:
+                background_tasks.add_task(mailer.send_email, request.contact_email, *_listed_email(request, spot))
+            return request_view(db, request)
+
         venue = db.query(DbVenue).filter(DbVenue.spot_id == spot.id).first() or _new_venue(db, spot, request, now)
 
     # A place a member suggested and nobody approved yet: the gift makes it public.
@@ -522,6 +575,56 @@ EMAILS = {
                 "<b>لا حساب ولا كلمة مرور:</b> هذا الرابط الخاص هو وسيلة دخولك الوحيدة. احتفظ به جيدًا."],
                "فتح صفحة الإدارة"),
     },
+    "received_place": {
+        "en": ("We received your place 🌸", "Thank you!",
+               ["We received <b>{venue}</b> for Blossom's date spots.",
+                "We'll look at it and answer you by email within 48 hours.",
+                "No account needed on your side: everything happens by email."]),
+        "fr": ("Nous avons bien reçu votre lieu 🌸", "Merci !",
+               ["Nous avons bien reçu <b>{venue}</b> pour les lieux de rendez-vous de Blossom.",
+                "Nous l'examinons et vous répondons par e-mail sous 48 heures.",
+                "Aucun compte à créer de votre côté : tout se passe par e-mail."]),
+        "zh": ("我们已收到你的地点 🌸", "谢谢！",
+               ["我们已收到 <b>{venue}</b>，将考虑加入 Blossom 的约会地点。", "我们会在 48 小时内通过邮件回复你。",
+                "你无需注册账号：一切都通过邮件完成。"]),
+        "ar": ("استلمنا مكانك 🌸", "شكرًا!",
+               ["استلمنا <b>{venue}</b> لإضافته إلى أماكن المواعدة في Blossom.", "سنراجعه ونرد عليك بالبريد خلال 48 ساعة.",
+                "لا تحتاج إلى إنشاء حساب: كل شيء يتم عبر البريد الإلكتروني."]),
+    },
+    "listed": {
+        "en": ("🌸 Your place is on Blossom!", "Your place is on Blossom!",
+               ["<b>{venue}</b> is now one of Blossom's date spots: couples can find it, save it and invite each other there.",
+                "Want to stand out? Offer couples a little gift (a coffee, a dessert…) any time: <a href=\"{gift}\">{gift_short}</a>"],
+               "See my place"),
+        "fr": ("🌸 Votre lieu est sur Blossom !", "Votre lieu est sur Blossom !",
+               ["<b>{venue}</b> fait maintenant partie des lieux de rendez-vous de Blossom : les couples peuvent le trouver, l'enregistrer et s'y inviter.",
+                "Envie de vous démarquer ? Offrez un petit cadeau aux couples (un café, un dessert…) quand vous voulez : <a href=\"{gift}\">{gift_short}</a>"],
+               "Voir mon lieu"),
+        "zh": ("🌸 你的店已上线 Blossom！", "你的店已上线 Blossom！",
+               ["<b>{venue}</b> 现在是 Blossom 的约会地点之一：情侣可以找到它、收藏它，并互相邀请到这里。",
+                "想更显眼？随时可以为情侣准备一份小礼物（一杯咖啡、一份甜点……）：<a href=\"{gift}\">{gift_short}</a>"],
+               "查看我的店"),
+        "ar": ("🌸 مكانك أصبح على Blossom!", "مكانك أصبح على Blossom!",
+               ["أصبح <b>{venue}</b> من أماكن المواعدة في Blossom: يمكن للأزواج العثور عليه وحفظه ودعوة بعضهم إليه.",
+                "تريد أن تتميّز؟ قدّم هدية صغيرة للأزواج (قهوة، حلوى…) متى شئت: <a href=\"{gift}\">{gift_short}</a>"],
+               "عرض مكاني"),
+    },
+    "refused_place": {
+        "en": ("Your place on Blossom", "Thank you for your request",
+               ["Thank you for wanting to welcome Blossom couples at <b>{venue}</b>.",
+                "We can't add this place for now.{reason}",
+                "You're welcome to send it again any time: <a href=\"{form}\">{form_short}</a>"]),
+        "fr": ("Votre lieu sur Blossom", "Merci pour votre demande",
+               ["Merci de vouloir accueillir des couples Blossom chez <b>{venue}</b>.",
+                "Nous ne pouvons pas ajouter ce lieu pour le moment.{reason}",
+                "Vous pouvez le renvoyer quand vous voulez : <a href=\"{form}\">{form_short}</a>"]),
+        "zh": ("你在 Blossom 上的地点", "感谢你的申请",
+               ["感谢你愿意在 <b>{venue}</b> 接待 Blossom 情侣。", "我们暂时无法添加这个地点。{reason}",
+                "欢迎随时重新提交：<a href=\"{form}\">{form_short}</a>"]),
+        "ar": ("مكانك على Blossom", "شكرًا على طلبك",
+               ["شكرًا لرغبتك في استقبال أزواج Blossom في <b>{venue}</b>.", "لا يمكننا إضافة هذا المكان حاليًا.{reason}",
+                "يمكنك إرساله مرة أخرى في أي وقت: <a href=\"{form}\">{form_short}</a>"]),
+    },
     "refused": {
         "en": ("Your Blossom partner request", "Thank you for your request",
                ["Thank you for wanting to welcome Blossom couples at <b>{venue}</b>.",
@@ -546,7 +649,8 @@ def _short(url):
 
 
 def _received_email(request: DbPartnerRequest):
-    subject, title, paragraphs = EMAILS["received"][_lang(request.language)]
+    kind = "received" if request.offer_title else "received_place"
+    subject, title, paragraphs = EMAILS[kind][_lang(request.language)]
     body = [p.format(venue=_e(request.venue_name), offer=_e(request.offer_title)) for p in paragraphs]
     return subject, mailer.card(title, body)
 
@@ -561,8 +665,18 @@ def _approved_email(venue: DbVenue, offer_title: str, offer_id: int):
     return subject, mailer.card(title, body, (button, manage_url(venue)))
 
 
+def _listed_email(request: DbPartnerRequest, spot: DbDateSpot):
+    """"Your place is on Blossom" - its page, and the way to add a gift."""
+    subject, title, paragraphs, button = EMAILS["listed"][_lang(request.language)]
+    page = f"{SITE_URL}/date-spots/{spot.id}"
+    gift = f"{SITE_URL}/partner?spot={spot.id}"
+    values = dict(venue=_e(spot.name), gift=gift, gift_short=_short(gift))
+    return subject, mailer.card(title, [p.format(**values) for p in paragraphs], (button, page))
+
+
 def _refused_email(request: DbPartnerRequest):
-    subject, title, paragraphs = EMAILS["refused"][_lang(request.language)]
+    kind = "refused" if request.offer_title or request.venue_id else "refused_place"
+    subject, title, paragraphs = EMAILS[kind][_lang(request.language)]
     form = f"{SITE_URL}/partner"
     reason = f" {_e(request.refuse_reason)}" if request.refuse_reason else ""
     values = dict(venue=_e(request.venue_name), reason=reason, form=form, form_short=_short(form))

@@ -167,6 +167,9 @@ with engine.begin() as connection:
         "ALTER TABLE partner_requests ADD COLUMN IF NOT EXISTS spot_id INTEGER "
         "REFERENCES date_spots(id) ON DELETE SET NULL"
     ))
+    # "Just list my place": a request without a gift, and the place's type.
+    connection.execute(text("ALTER TABLE partner_requests ALTER COLUMN offer_title DROP NOT NULL"))
+    connection.execute(text("ALTER TABLE partner_requests ADD COLUMN IF NOT EXISTS category VARCHAR(60)"))
     # Profiles an admin made for a friend, waiting for the friend to confirm.
     for column in (
         "created_by INTEGER",

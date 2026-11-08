@@ -683,8 +683,10 @@ class DbPartnerRequest(Base):
     city = Column(String(120), nullable=True)
     country = Column(String(120), nullable=True)
     about = Column(Text, nullable=True)
-    offer_title = Column(String(120), nullable=False)
+    # Empty for "just list my place" (no gift).
+    offer_title = Column(String(120), nullable=True)
     offer_details = Column(Text, nullable=True)
+    category = Column(String(60), nullable=True)  # the place's type, e.g. "Coffee"
     max_couples = Column(Integer, nullable=True)
     ends_at = Column(DateTime, nullable=True)
     valid_hours = Column(Integer, nullable=True)

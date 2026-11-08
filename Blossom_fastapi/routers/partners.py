@@ -34,7 +34,10 @@ class PartnerRequestIn(BaseModel):
     city: Optional[str] = Field(default=None, max_length=120)
     country: Optional[str] = Field(default=None, max_length=120)
     about: Optional[str] = Field(default=None, max_length=1000)
-    offer_title: str = Field(max_length=120)
+    category: Optional[str] = Field(default=None, max_length=60)
+    # True: "just list my place" - no gift, the offer fields are ignored.
+    place_only: bool = False
+    offer_title: Optional[str] = Field(default=None, max_length=120)
     offer_details: Optional[str] = Field(default=None, max_length=500)
     max_couples: Optional[int] = None
     ends_at: Optional[datetime] = None

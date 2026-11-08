@@ -146,6 +146,12 @@ TEXTS = {
         "zh": "🏪 新的合作申请：{name} - {title}",
         "ar": "🏪 طلب شراكة جديد: {name} - {title}",
     },
+    "partner_place": {
+        "en": "🏪 New place to add: {name} ({city})",
+        "fr": "🏪 Nouveau lieu à ajouter : {name} ({city})",
+        "zh": "🏪 新的地点待添加：{name}（{city}）",
+        "ar": "🏪 مكان جديد للإضافة: {name} ({city})",
+    },
     "feedback_child": {
         "en": "🚨 Child safety report: {snippet}",
         "fr": "🚨 Signalement sécurité des enfants : {snippet}",
@@ -411,14 +417,16 @@ def notify_partner_offer(db: Session, background_tasks: BackgroundTasks, venue_n
 
 
 def notify_partner_request(db: Session, background_tasks: BackgroundTasks, request):
-    """"🏪 New partner request: Café Lune - -20% on the bill" to the admins."""
+    """"🏪 New partner request: Café Lune - -20% on the bill" to the admins -
+    or "🏪 New place to add: Café Lune (Paris)" when it comes without a gift."""
     targets = _admin_targets(db)
+    key = "partner_request" if request.offer_title else "partner_place"
     _queue(background_tasks, [
         {
             "to": token,
             "title": "Blossom",
-            "body": TEXTS["partner_request"][normalize_language(language)].format(
-                name=request.venue_name, title=request.offer_title),
+            "body": TEXTS[key][normalize_language(language)].format(
+                name=request.venue_name, title=request.offer_title, city=request.city or ""),
             "data": {"type": "partner_request", "requestId": request.id},
             "sound": "default",
             "channelId": "default",
