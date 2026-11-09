@@ -9,6 +9,7 @@ from auth.oauth2 import get_current_user
 from database.database import get_db
 from routers.schemas import ProfileBase, ProfileDisplay, UserAuth,ProfileDisplayforPhoto,BioUpdate,ConnectionUpdate,DetectedCoords,DetectedLocation,PauseUpdate
 from routers.schemas import UserAuth,ProfilePhotoDisplay
+from routers.schemas import ProfileDetailsUpdate
 import cloudinary.uploader
 from datetime import datetime
 from sqlalchemy import func
@@ -178,6 +179,16 @@ def update_bio(request:BioUpdate,db:Session = Depends(get_db),current_user: User
     result=db_profile.update_bio(db,current_user,request.bio)
     if result is None:
         raise HTTPException(status_code=404,detail="Profile still doesn't exist")
+    return result
+
+@router.put("/details", response_model=ProfileDisplay)
+def update_details(request: ProfileDetailsUpdate, db: Session = Depends(get_db),
+                   current_user: UserAuth = Depends(get_current_user)):
+    """"Edit profile": complete or change the answers from sign-up."""
+    result = db_profile.update_details(db, current_user, request.model_dump(exclude_unset=True))
+    if result is None:
+        raise HTTPException(status_code=404, detail="Profile still doesn't exist")
+    result.paused = result.paused_at is not None
     return result
 
 @router.put("/connection", response_model=ProfileDisplay)

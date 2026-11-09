@@ -216,6 +216,58 @@ def update_connection_type(db: Session, user: UserAuth, value: str):
     return get_profile_by_id(db, profile.id)
 
 
+# "Edit profile": the answers that can change after sign-up.
+DETAIL_FIELDS = (
+    "bio", "occupation", "education", "height_cm", "personality_type",
+    "smoking", "drinking", "exercise_frequency", "has_pets",
+    "relationship_goal", "first_date_preference", "past_relationships_count",
+    "last_breakup_reason", "has_children", "wants_children",
+)
+
+
+def _language_list(values) -> list:
+    """Names, trimmed, each once, in the order given."""
+    seen, out = set(), []
+    for value in values or []:
+        name = " ".join(str(value or "").split())[:60]
+        if name and name.lower() not in seen:
+            seen.add(name.lower())
+            out.append(name)
+    return out
+
+
+def update_details(db: Session, user: UserAuth, changes: dict):
+    """Only the keys in changes are touched; an empty answer is cleared.
+    Languages are replaced as a whole (at least one spoken language stays)."""
+    from database.models import DbLearningLanguage
+    profile = db.query(DbProfile).filter(DbProfile.user_id == user.id).first()
+    if not profile:
+        return None
+    for field in DETAIL_FIELDS:
+        if field not in changes:
+            continue
+        value = changes[field]
+        value = value.strip() if isinstance(value, str) else value
+        # Language exchange only: the goal stays Friendship, as at sign-up.
+        if field == "relationship_goal" and profile.connection_type == "language":
+            continue
+        setattr(profile, field, value or None)
+    if changes.get("languages") is not None:
+        names = _language_list(changes["languages"])
+        if not names:
+            raise HTTPException(status_code=400, detail="Keep at least one language you speak.")
+        db.query(DbLanguage).filter(DbLanguage.profile_id == profile.id).delete()
+        for name in names:
+            db.add(DbLanguage(language_name=name, profile_id=profile.id))
+    if changes.get("learning_languages") is not None:
+        db.query(DbLearningLanguage).filter(DbLearningLanguage.profile_id == profile.id).delete()
+        for name in _language_list(changes["learning_languages"]):
+            db.add(DbLearningLanguage(language_name=name, profile_id=profile.id))
+    db.commit()
+    db.expire_all()
+    return get_profile_by_id(db, profile.id)
+
+
 def update_bio(db:Session,user:UserAuth,bio:str):
 
     profile_db=db.query(DbProfile).filter(DbProfile.user_id == user.id)

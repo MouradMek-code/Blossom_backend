@@ -445,6 +445,29 @@ class VerifyOTPRequest(BaseModel):
 class BioUpdate(BaseModel):
     bio: str
 
+
+class ProfileDetailsUpdate(BaseModel):
+    """"Edit profile": the answers that can be completed or changed after
+    sign-up. Only the fields sent change; "" or null clears one."""
+    bio: Optional[str] = Field(default=None, max_length=2000)
+    occupation: Optional[str] = Field(default=None, max_length=255)
+    education: Optional[str] = Field(default=None, max_length=255)
+    height_cm: Optional[str] = Field(default=None, max_length=50)
+    personality_type: Optional[str] = Field(default=None, max_length=255)
+    smoking: Optional[str] = Field(default=None, max_length=50)
+    drinking: Optional[str] = Field(default=None, max_length=50)
+    exercise_frequency: Optional[str] = Field(default=None, max_length=100)
+    has_pets: Optional[str] = Field(default=None, max_length=50)
+    relationship_goal: Optional[str] = Field(default=None, max_length=100)
+    first_date_preference: Optional[str] = Field(default=None, max_length=100)
+    past_relationships_count: Optional[str] = Field(default=None, max_length=50)
+    last_breakup_reason: Optional[str] = Field(default=None, max_length=100)
+    has_children: Optional[str] = Field(default=None, max_length=50)
+    wants_children: Optional[str] = Field(default=None, max_length=50)
+    # The whole list each time (replaces the old one).
+    languages: Optional[List[str]] = Field(default=None, max_length=12)
+    learning_languages: Optional[List[str]] = Field(default=None, max_length=12)
+
 class DetectedLocation(BaseModel):
     """Where the phone is, as its own map service names it (approximate)."""
     country_code: str = Field(min_length=2, max_length=2)

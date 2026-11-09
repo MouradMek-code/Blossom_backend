@@ -34,6 +34,13 @@ TEXTS = {
         "zh": "💕 你和 {name} 配对成功！",
         "ar": "💕 تطابق جديد مع {name}!",
     },
+    # To the woman of a man/woman dating match: she opens the conversation.
+    "match_you_first": {
+        "en": "💕 It's a match with {name}! On Blossom, you send the first message 💬",
+        "fr": "💕 C'est un match avec {name} ! Sur Blossom, c'est vous qui envoyez le premier message 💬",
+        "zh": "💕 你和 {name} 配对成功！在 Blossom，由你发出第一条消息 💬",
+        "ar": "💕 تطابق جديد مع {name}! على Blossom، أنتِ من ترسل الرسالة الأولى 💬",
+    },
     "like": {
         "en": "🌸 Someone likes you",
         "fr": "🌸 Quelqu'un vous aime",
@@ -339,7 +346,10 @@ def notify_like(db: Session, background_tasks: BackgroundTasks, liker_profile_id
     if not liker:
         return
     if matched:
-        messages = _messages_for_profile(db, liked_profile_id, "match", liker.first_name, {"type": "match"})
+        from database.db_message import first_move
+        liked = db.query(DbProfile).filter(DbProfile.id == liked_profile_id).first()
+        kind = "match_you_first" if first_move(liked, liker) == "you" else "match"
+        messages = _messages_for_profile(db, liked_profile_id, kind, liker.first_name, {"type": "match"})
     else:
         messages = _messages_for_profile(db, liked_profile_id, "like", "", {"type": "like"})
     _queue(background_tasks, messages)

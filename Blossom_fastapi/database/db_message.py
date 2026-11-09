@@ -18,6 +18,18 @@ def _must_write_first(me: DbProfile, other: DbProfile) -> bool:
     return {me.gender, other.gender} == {"Man", "Woman"} and me.gender == "Man"
 
 
+def first_move(me: DbProfile, other: DbProfile):
+    """Who opens this conversation, from `me`'s side: "you" (she), "them"
+    (he waits for her) or None (anyone can)."""
+    if me is None or other is None:
+        return None
+    if _must_write_first(me, other):
+        return "them"
+    if _must_write_first(other, me):
+        return "you"
+    return None
+
+
 def _profile_card(profile: DbProfile) -> dict:
     """The bit of a profile that chat screens show: name, age and main photo."""
     return {
@@ -178,12 +190,16 @@ def get_conversation_details(
     if not other:
         raise HTTPException(status_code=404, detail="This person is no longer on Blossom")
 
+    # Still empty: whose move it is (women write first) - said to both.
+    empty = db.query(DbMessage.id).filter(DbMessage.conversation_id == conversation.id).first() is None
+    me = db.query(DbProfile).filter(DbProfile.id == profile_id).first() if empty else None
     return {
         "conversation_id": conversation.id,
         # Lets the client tell its own bubbles apart without relying on a
         # locally stored profile id that may be missing.
         "me_profile_id": profile_id,
         "profile": _profile_card(other),
+        "first_move": first_move(me, other) if empty else None,
         # "Matched through the event: ..." when an event's organiser made the match.
         "event": _match_event(db, match),
     }
@@ -278,6 +294,8 @@ def get_inbox(
             "matched_at": match.matched_at,
             # No messages yet and the rules say the other person opens.
             "waiting_for_them": last is None and me is not None and _must_write_first(me, other),
+            # ...and the other side of it: she opens this one.
+            "your_move": last is None and me is not None and _must_write_first(other, me),
         })
 
     def activity(item):
