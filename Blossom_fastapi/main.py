@@ -170,6 +170,12 @@ with engine.begin() as connection:
     # "Just list my place": a request without a gift, and the place's type.
     connection.execute(text("ALTER TABLE partner_requests ALTER COLUMN offer_title DROP NOT NULL"))
     connection.execute(text("ALTER TABLE partner_requests ADD COLUMN IF NOT EXISTS category VARCHAR(60)"))
+    # Chat: photos, "typing...", "active 5 min ago".
+    connection.execute(text("ALTER TABLE message ADD COLUMN IF NOT EXISTS image_url VARCHAR"))
+    connection.execute(text("ALTER TABLE message ADD COLUMN IF NOT EXISTS image_public_id VARCHAR(255)"))
+    connection.execute(text("ALTER TABLE conversation ADD COLUMN IF NOT EXISTS profile1_typing_at TIMESTAMP"))
+    connection.execute(text("ALTER TABLE conversation ADD COLUMN IF NOT EXISTS profile2_typing_at TIMESTAMP"))
+    connection.execute(text("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS last_active_at TIMESTAMP"))
     # Profiles an admin made for a friend, waiting for the friend to confirm.
     for column in (
         "created_by INTEGER",

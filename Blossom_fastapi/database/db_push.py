@@ -28,6 +28,12 @@ TEXTS = {
         "zh": "💬 {name} 给你发来一条新消息",
         "ar": "💬 رسالة جديدة من {name}",
     },
+    "photo": {
+        "en": "📷 {name} sent you a photo",
+        "fr": "📷 {name} vous a envoyé une photo",
+        "zh": "📷 {name} 给你发了一张照片",
+        "ar": "📷 صورة جديدة من {name}",
+    },
     "match": {
         "en": "💕 It's a match with {name}!",
         "fr": "💕 C'est un match avec {name} !",
@@ -322,8 +328,10 @@ def _queue(background_tasks: BackgroundTasks, messages):
         background_tasks.add_task(send_push_messages, messages)
 
 
-def notify_new_message(db: Session, background_tasks: BackgroundTasks, conversation_id: int, sender_profile_id: int):
-    """"💬 New message from Wendy" to the other person in the conversation.
+def notify_new_message(db: Session, background_tasks: BackgroundTasks, conversation_id: int, sender_profile_id: int,
+                       photo: bool = False):
+    """"💬 New message from Wendy" (or "📷 Wendy sent you a photo") to the
+    other person in the conversation.
     Called after send_message succeeded, so access, blocks and the
     women-write-first rule have already been checked."""
     conversation = db.query(DbConversation).filter(DbConversation.id == conversation_id).first()
@@ -333,7 +341,7 @@ def notify_new_message(db: Session, background_tasks: BackgroundTasks, conversat
     match = conversation.match
     recipient_id = match.profile2_id if match.profile1_id == sender_profile_id else match.profile1_id
     _queue(background_tasks, _messages_for_profile(
-        db, recipient_id, "message", sender.first_name,
+        db, recipient_id, "photo" if photo else "message", sender.first_name,
         {"type": "message", "conversationId": conversation_id},
     ))
 

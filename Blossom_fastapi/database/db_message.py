@@ -1,10 +1,50 @@
 from fastapi import HTTPException
 from database.models import DbPost,DbMessage,DbConversation,DbMatch,DbProfile
 from routers.schemas import UserBase, PostBase
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
-from datetime import datetime
+from datetime import datetime, timedelta
 from database import db_block
+import cloudinary.uploader
+
+# What a photo message says to anything that can't show the photo (older app
+# versions, the Messages list, notifications).
+PHOTO_CONTENT = "📷 Photo"
+# A "typing" ping this recent means they're still typing (clients ping every
+# few seconds while the box changes).
+TYPING_FRESH_SECONDS = 6
+# last_active_at is written at most once a minute per person.
+ACTIVE_EVERY_SECONDS = 60
+
+
+def touch_active(db: Session, profile_id: int, now: datetime = None):
+    """The member is on Blossom right now (called from what the app and the
+    website poll: the unread badge, the inbox, an open chat)."""
+    now = now or datetime.utcnow()
+    updated = db.query(DbProfile).filter(
+        DbProfile.id == profile_id,
+        or_(
+            DbProfile.last_active_at.is_(None),
+            DbProfile.last_active_at < now - timedelta(seconds=ACTIVE_EVERY_SECONDS),
+        ),
+    ).update({DbProfile.last_active_at: now}, synchronize_session=False)
+    if updated:
+        db.commit()
+
+
+def _typing_column(match, profile_id: int) -> str:
+    return "profile1_typing_at" if match.profile1_id == profile_id else "profile2_typing_at"
+
+
+def _other_id(match, profile_id: int) -> int:
+    return match.profile2_id if match.profile1_id == profile_id else match.profile1_id
+
+
+def _both_have_written(messages, profile_id: int, other_id: int) -> bool:
+    """Photos wait until both have written (typed messages; invites and
+    photos don't count)."""
+    senders = {m.sender_profile_id for m in messages if not m.image_url and not m.date_spot_id}
+    return profile_id in senders and other_id in senders
 
 
 def _must_write_first(me: DbProfile, other: DbProfile) -> bool:
@@ -64,7 +104,8 @@ def send_message(
     conversation_id: int,
     profile_id: int,
     content: str,
-    date_spot_id: int = None
+    date_spot_id: int = None,
+    image: tuple = None,
 ):
     # Date spot invites come through here too, so they obey exactly the same
     # rules as typed messages: access, blocks, and who may write first.
@@ -100,10 +141,17 @@ def send_message(
         conversation_id=conversation_id,
         sender_profile_id=profile_id,
         content=content,
-        date_spot_id=date_spot_id
+        date_spot_id=date_spot_id,
+        image_url=image[0] if image else None,
+        image_public_id=image[1] if image else None,
     )
 
     db.add(message)
+    # Sent: no longer typing, and on Blossom right now.
+    setattr(conversation, _typing_column(match, profile_id), None)
+    db.query(DbProfile).filter(DbProfile.id == profile_id).update(
+        {DbProfile.last_active_at: datetime.utcnow()}, synchronize_session=False
+    )
     db.commit()
     db.refresh(message)
 
@@ -164,6 +212,97 @@ def get_messages(
     # Invite cards: the spot's promotion, and the couple's code.
     from database.db_offers import decorate_messages
     return decorate_messages(db, messages)
+
+
+def get_live(
+    db: Session,
+    conversation_id: int,
+    profile_id: int,
+    now: datetime = None
+):
+    """An open chat's poll: the messages (reading them, as get_messages
+    does), whether the other person is typing, when they were last on
+    Blossom (not while their profile is on a break), and whether photos can
+    be sent yet. Nothing about someone blocked either way."""
+    now = now or datetime.utcnow()
+    conversation = get_conversation_for_profile(db, conversation_id, profile_id)
+    if not conversation:
+        raise HTTPException(
+            status_code=403,
+            detail="You don't have access to this conversation"
+        )
+    match = conversation.match
+    other_id = _other_id(match, profile_id)
+    typing_at = getattr(conversation, _typing_column(match, other_id))
+    blocked = db_block.is_blocked_either_direction(db, profile_id, other_id)
+    other = db.query(DbProfile.last_active_at, DbProfile.paused_at).filter(DbProfile.id == other_id).first()
+    # Before loading the messages: it commits, which would expire them.
+    touch_active(db, profile_id, now)
+    messages = get_messages(db, conversation_id, profile_id)
+    if blocked:
+        return {"messages": messages, "typing": False, "last_active_at": None, "photos_allowed": False}
+    return {
+        "messages": messages,
+        "typing": typing_at is not None and 0 <= (now - typing_at).total_seconds() <= TYPING_FRESH_SECONDS,
+        "last_active_at": other.last_active_at if other and other.paused_at is None else None,
+        "photos_allowed": _both_have_written(messages, profile_id, other_id),
+    }
+
+
+def set_typing(db: Session, conversation_id: int, profile_id: int, now: datetime = None):
+    """The box is changing: "typing..." on the other side for a few seconds."""
+    now = now or datetime.utcnow()
+    conversation = get_conversation_for_profile(db, conversation_id, profile_id)
+    if not conversation:
+        raise HTTPException(
+            status_code=403,
+            detail="You don't have access to this conversation"
+        )
+    match = conversation.match
+    if db_block.is_blocked_either_direction(db, profile_id, _other_id(match, profile_id)):
+        return
+    setattr(conversation, _typing_column(match, profile_id), now)
+    db.commit()
+    touch_active(db, profile_id, now)
+
+
+def check_can_send_photo(db: Session, conversation_id: int, profile_id: int):
+    """Before uploading a chat photo: access, blocks, and both have written."""
+    conversation = get_conversation_for_profile(db, conversation_id, profile_id)
+    if not conversation:
+        raise HTTPException(
+            status_code=403,
+            detail="You don't have access to this conversation"
+        )
+    other_id = _other_id(conversation.match, profile_id)
+    if db_block.is_blocked_either_direction(db, profile_id, other_id):
+        raise HTTPException(status_code=403, detail="You can't message a blocked profile")
+    messages = db.query(DbMessage.sender_profile_id, DbMessage.image_url, DbMessage.date_spot_id).filter(
+        DbMessage.conversation_id == conversation_id
+    ).all()
+    if not _both_have_written(messages, profile_id, other_id):
+        raise HTTPException(
+            status_code=403,
+            detail="You can send photos once you've both written to each other."
+        )
+
+
+def delete_conversation_messages(db: Session, conversation_id: int):
+    """A conversation's messages, and its photos on Cloudinary (unmatch,
+    account deleted). The caller commits."""
+    public_ids = [
+        public_id for (public_id,) in db.query(DbMessage.image_public_id).filter(
+            DbMessage.conversation_id == conversation_id,
+            DbMessage.image_public_id.isnot(None),
+        ).all()
+    ]
+    for public_id in public_ids:
+        try:
+            cloudinary.uploader.destroy(public_id)
+        except Exception:
+            # An orphaned Cloudinary asset isn't worth blocking this over.
+            pass
+    db.query(DbMessage).filter(DbMessage.conversation_id == conversation_id).delete()
 
 
 def get_conversation_details(
@@ -289,6 +428,7 @@ def get_inbox(
                 "created_at": last.created_at,
                 "mine": last.sender_profile_id == profile_id,
                 "is_invite": last.date_spot_id is not None,
+                "is_photo": last.image_url is not None,
             } if last else None,
             "unread_count": unread_counts.get(conversation.id, 0) if conversation else 0,
             "matched_at": match.matched_at,

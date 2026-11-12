@@ -123,6 +123,9 @@ class DbProfile(Base):
     # (database/db_verification.py), and the pose asked for the next selfie.
     verified_at = Column(DateTime, nullable=True)
     verification_pose = Column(String(20), nullable=True)
+    # Last time the member used the app or the website (to the minute):
+    # "Active 5 min ago" in their chats. See db_message.touch_active.
+    last_active_at = Column(DateTime, nullable=True)
     # An admin asked this member to verify (suspicious profile) by then; the
     # admin deletes the account by hand if they don't.
     verify_deadline = Column(DateTime, nullable=True)
@@ -287,6 +290,11 @@ class DbConversation(Base):
         default=datetime.utcnow
     )
 
+    # "Typing...": when each side (the match's profile1 / profile2) last typed
+    # in this chat. A few seconds old = still typing.
+    profile1_typing_at = Column(DateTime, nullable=True)
+    profile2_typing_at = Column(DateTime, nullable=True)
+
     match = relationship(
         "DbMatch",
         back_populates="conversation"
@@ -333,6 +341,12 @@ class DbMessage(Base):
 
     # When the other person said "I'm in" to this date spot invite.
     accepted_at = Column(DateTime, nullable=True)
+
+    # A photo sent in the chat. content then just says "📷 Photo", which is
+    # what older app versions show. The Cloudinary id lets it be deleted with
+    # the conversation (unmatch, account deleted).
+    image_url = Column(String, nullable=True)
+    image_public_id = Column(String(255), nullable=True)
 
     # Whether the recipient has opened the conversation since this arrived.
     # Chats are 1:1, so "recipient" is simply the participant who didn't send

@@ -427,9 +427,26 @@ class MessageDisplay(BaseModel):
     # code if that got them one.
     accepted_at: Optional[datetime] = None
     voucher: Optional[VoucherBrief] = None
+    # A photo sent in the chat.
+    image_url: Optional[str] = None
+    # Whether the other person has opened the chat since it arrived: "Seen"
+    # under your last message.
+    is_read: bool = False
 
     class Config:
         orm_mode = True
+
+
+class ChatLive(BaseModel):
+    """What an open chat polls every few seconds: the messages, and whether
+    the other person is typing / when they were last on Blossom."""
+    messages: list[MessageDisplay]
+    typing: bool = False
+    last_active_at: Optional[datetime] = None
+    # Photos can be sent once both have written to each other.
+    photos_allowed: bool = False
+
+
 class ConversationDisplay(BaseModel):
     id: int
     messages: list[MessageDisplay]

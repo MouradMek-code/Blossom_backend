@@ -69,7 +69,8 @@ def unmatch(
 
     conversation = db.query(DbConversation).filter(DbConversation.match_id == match.id).first()
     if conversation:
-        db.query(DbMessage).filter(DbMessage.conversation_id == conversation.id).delete()
+        from database.db_message import delete_conversation_messages
+        delete_conversation_messages(db, conversation.id)
         db.delete(conversation)
 
     db.query(DbProfileLike).filter(
