@@ -31,6 +31,12 @@ def clean_connection_type(value) -> str:
 def create_profile(db:Session,request:ProfileBase,user:UserAuth):
     from database.closed_countries import check_country
     check_country(request.country)
+    # One profile per account. Sent again - the app trying once more after
+    # the answer got lost on the way - it gets the profile already made
+    # instead of a second card of the same person in Browse.
+    existing = db.query(DbProfile).filter(DbProfile.user_id == user.id).first()
+    if existing:
+        return existing
     connection_type = clean_connection_type(request.connection_type)
     relationship_goal = request.relationship_goal
     # Language exchange is about friendship; that question is skipped for them.

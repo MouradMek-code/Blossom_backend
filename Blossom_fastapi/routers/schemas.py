@@ -12,6 +12,21 @@ class UserBase(BaseModel):
     phone_number: PhoneNumber
     date_of_birth: date
 
+    # Phone keyboards add a space after a word picked from the suggestions:
+    # "sofia " would become a username nobody can log in with, and an email
+    # with a space is refused. Spaces around them never mean anything.
+    @field_validator("username", "email", mode="before")
+    @classmethod
+    def strip_spaces(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("username")
+    @classmethod
+    def username_not_empty(cls, value: str) -> str:
+        if not value:
+            raise ValueError("Please enter a username")
+        return value
+
     @field_validator("date_of_birth")
     @classmethod
     def must_be_adult(cls, value: date) -> date:

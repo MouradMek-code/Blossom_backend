@@ -551,6 +551,7 @@ async def resend_email_verification(email: str, phone_number: str, db: Session =
     # Also used when the user corrects a mistyped email from the verification
     # screen, so re-check the address isn't already registered before sending
     # a new code to it.
+    email = (email or "").strip()
     if db.query(DbUser).filter(DbUser.email == email).first():
         raise HTTPException(status_code=409, detail="An account with this email already exists. Try logging in instead.")
     if _too_many_codes(db, email):

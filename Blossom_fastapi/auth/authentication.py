@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.security.oauth2 import OAuth2PasswordRequestForm
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from auth import oauth2
 from database.database import get_db
@@ -23,6 +24,10 @@ def login(request : OAuth2PasswordRequestForm = Depends(),db: Session = Depends(
     user = db.query(DbUser).filter(
         (DbUser.username == identifier) | (DbUser.email == identifier)
     ).first()
+    if not user:
+        # Accounts made before sign-up removed stray spaces: "sofia " is
+        # found with "sofia".
+        user = db.query(DbUser).filter(func.trim(DbUser.username) == identifier).first()
     if not user:
        raise HTTPException(status_code=401, detail="No account found with that username or email.")
 
